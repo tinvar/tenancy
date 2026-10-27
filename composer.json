@@ -1,0 +1,26 @@
+{
+  "name": "tinvar/tenancy",
+  "description": "Tinvar's tenancy, for the applications that opt into it: tenants read from a host or a signed URL, a tenant tree with its limits, the tenant switcher and tenants for commands.",
+  "type": "library",
+  "license": "MIT",
+  "require": {
+    "php": ">=8.5",
+    "tinvar/database": "0.4.*",
+    "tinvar/framework": "0.4.*",
+    "tinvar/support": "0.4.*"
+  },
+  "require-dev": {
+    "pestphp/pest": "^4.0",
+    "tinvar/testing": "0.4.*"
+  },
+  "autoload": {
+    "psr-4": {
+      "Tinvar\\Tenancy\\": "src/Tenancy/"
+    },
+    "files": [
+      "aliases.php"
+    ]
+  },
+  "config": { "sort-packages": true },
+  "minimum-stability": "stable"
+}

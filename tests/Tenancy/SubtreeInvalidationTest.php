@@ -105,6 +105,48 @@ final readonly class ScriptActions
 
         return ActionResult::revalidateTags('scripts');
     }
+
+    /** Renames every script so named across the subtree, by one statement. */
+    #[Action, NoAuthorization(reason: 'fixture: exercises invalidation, not access control')]
+    public function renameWithin(string $from, string $to): ActionResult
+    {
+        $this->orm->withinSubtree(fn (): int => $this->orm->query(Script::class)->where('name', $from)->update(['name' => $to]));
+
+        return ActionResult::revalidateTags('scripts');
+    }
+
+    /** Renames one script read across the subtree, by saving its model. */
+    #[Action, NoAuthorization(reason: 'fixture: exercises invalidation, not access control')]
+    public function saveWithin(string $id, string $to): ActionResult
+    {
+        $this->orm->withinSubtree(function () use ($id, $to): void {
+            $script = $this->orm->find(Script::class, $id) ?? throw new \LogicException('no such script');
+            $script->name = $to;
+            $this->orm->save($script);
+        });
+
+        return ActionResult::revalidateTags('scripts');
+    }
+
+    /** Deletes every script so named, in any tenant, by one statement. */
+    #[Action, NoAuthorization(reason: 'fixture: exercises invalidation, not access control')]
+    public function deleteAcross(string $name): ActionResult
+    {
+        $this->orm->acrossTenants(fn (): int => $this->orm->query(Script::class)->where('name', $name)->delete());
+
+        return ActionResult::revalidateTags('scripts');
+    }
+
+    /** Deletes one script, in any tenant, by deleting its model. */
+    #[Action, NoAuthorization(reason: 'fixture: exercises invalidation, not access control')]
+    public function deleteModelAcross(string $id): ActionResult
+    {
+        $this->orm->acrossTenants(function () use ($id): void {
+            $this->orm->delete($this->orm->find(Script::class, $id) ?? throw new \LogicException('no such script'));
+        });
+
+        return ActionResult::revalidateTags('scripts');
+    }
 }
 
 /** The reseller's page, its loaders and queries, and the actions any tenant runs. */
@@ -194,6 +236,27 @@ final class World
     {
         $this->hub->published = [];
         $this->orm->actAs($runAs, fn (): ActionResult => $this->actions->run('ScriptActions.addAs', ['tenant' => $tenant, 'name' => $name]));
+
+        return array_column($this->hub->published, 'topic');
+    }
+
+    /**
+     * Runs an action as the reseller, in its panel with the subtree granted
+     * as RequirePanelMembership grants it, and answers the topics the hub
+     * was told of.
+     *
+     * @param array<string, mixed> $input
+     * @return list<string>
+     */
+    public function widened(string $action, array $input): array
+    {
+        $this->hub->published = [];
+        $this->panels->within('reseller', fn (): mixed => $this->panels->grantedWithin(
+            new PanelBinding('reseller', ['reseller'], ['reseller.access'], subtree: true),
+            fn (): mixed => $this->orm->actAs('reseller', fn (): mixed => $this->orm->grantSubtree(
+                fn (): ActionResult => $this->actions->run($action, $input),
+            )),
+        ));
 
         return array_column($this->hub->published, 'topic');
     }
@@ -293,6 +356,100 @@ it('tells a child\'s own pages of a write its parent made as the child', functio
         ->and(array_intersect($parent, $told))->not->toBe([], 'the tenant the action ran as is still told')
         ->and(array_intersect($beside, $told))->toBe([])
         ->and($exact->get('scripts.own', $declaration, [], 'globex')['hit'])->toBeTrue();
+});
+
+// A write widened by withinSubtree() or acrossTenants() is made as the
+// tenant in force, and was announced as it alone: an update or delete that
+// reached a child's row left the child's own pages and cached queries
+// stale (ADR 0106). The rows' own tenants are named now, and only theirs.
+describe('a widened write', function () {
+    /**
+     * Each tenant's own cached answer for `scripts`, and the topics its
+     * page reading them alone listens on.
+     *
+     * @return array{QueryCache, Query, array<string, list<string>>}
+     */
+    $cached = static function (World $world): array {
+        $exact = new QueryCache($world->store, new AuthContext());
+        $declaration = new Query(cache: '5m', tags: static function (): array {
+            return ['scripts'];
+        });
+        $listening = [];
+        foreach (Tenants::ALL as $tenant) {
+            $exact->put('scripts.own', $declaration, [], $tenant, ["{$tenant}-script"]);
+            $listening[$tenant] = $world->listeningAs($tenant);
+        }
+
+        return [$exact, $declaration, $listening];
+    };
+
+    $stale = static function (QueryCache $exact, Query $declaration): array {
+        $stale = [];
+        foreach (Tenants::ALL as $tenant) {
+            if (!$exact->get('scripts.own', $declaration, [], $tenant)['hit']) {
+                $stale[] = $tenant;
+            }
+        }
+
+        return $stale;
+    };
+
+    it('tells the child whose row an update inside withinSubtree() reached, and no one beside it', function () use ($cached, $stale) {
+        $world = new World();
+        [$exact, $declaration, $listening] = $cached($world);
+
+        $told = $world->widened('ScriptActions.renameWithin', ['from' => 'acme-west-script', 'to' => 'renamed']);
+
+        expect($stale($exact, $declaration))->toBe(['reseller', 'acme-west'])
+            ->and(array_intersect($listening['acme-west'], $told))->not->toBe([])
+            ->and(array_intersect($listening['acme'], $told))->toBe([])
+            ->and(array_intersect($listening['globex'], $told))->toBe([])
+            ->and(array_intersect($listening['other'], $told))->toBe([]);
+    });
+
+    it('tells the child whose row a model saved inside withinSubtree() is', function () use ($cached, $stale) {
+        $world = new World();
+        [$exact, $declaration, $listening] = $cached($world);
+        $id = $world->orm->actAs('globex', fn (): string => $world->orm->all(Script::class)[0]->id);
+
+        $told = $world->widened('ScriptActions.saveWithin', ['id' => $id, 'to' => 'renamed']);
+
+        expect($stale($exact, $declaration))->toBe(['reseller', 'globex'])
+            ->and(array_intersect($listening['globex'], $told))->not->toBe([])
+            ->and(array_intersect($listening['acme'], $told))->toBe([]);
+    });
+
+    it('tells every tenant whose rows a delete inside acrossTenants() reached', function () use ($cached, $stale) {
+        $world = new World();
+        [$exact, $declaration, $listening] = $cached($world);
+
+        $told = $world->widened('ScriptActions.deleteAcross', ['name' => 'other-script']);
+
+        expect($stale($exact, $declaration))->toBe(['reseller', 'other'])
+            ->and(array_intersect($listening['other'], $told))->not->toBe([])
+            ->and(array_intersect($listening['acme'], $told))->toBe([]);
+    });
+
+    it('tells the tenant whose model a delete inside acrossTenants() removed', function () use ($cached, $stale) {
+        $world = new World();
+        [$exact, $declaration, $listening] = $cached($world);
+        $id = $world->orm->actAs('acme', fn (): string => $world->orm->all(Script::class)[0]->id);
+
+        $told = $world->widened('ScriptActions.deleteModelAcross', ['id' => $id]);
+
+        expect($stale($exact, $declaration))->toBe(['reseller', 'acme'])
+            ->and(array_intersect($listening['acme'], $told))->not->toBe([])
+            ->and(array_intersect($listening['globex'], $told))->toBe([]);
+    });
+
+    it('names no other tenant when the widened write reaches no row', function () use ($cached, $stale) {
+        $world = new World();
+        [$exact, $declaration] = $cached($world);
+
+        $world->widened('ScriptActions.renameWithin', ['from' => 'nobody-script', 'to' => 'renamed']);
+
+        expect($stale($exact, $declaration))->toBe(['reseller']);
+    });
 });
 
 describe('the tenants above a tenant', function () {

@@ -39,7 +39,7 @@ use Tinvar\Tests\Jobs\Fixtures\Harness;
 use Tinvar\Tests\Jobs\Fixtures\Journal;
 use Tinvar\Tests\Orm\Fixtures\Script;
 
-require_once __DIR__ . '/../../../framework/tests/Jobs/Fixtures/jobs.php';
+require_once \Composer\InstalledVersions::getInstallPath('tinvar/framework') . '/tests/Jobs/Fixtures/jobs.php';
 
 final class TwoTenants implements TenantDirectory
 {

@@ -21,7 +21,7 @@ use Tinvar\Tests\Tenancy\Fixtures\App;
 
 use function Tinvar\Tests\Orm\Fixtures\withPolicies;
 
-require_once __DIR__ . '/../../../database/tests/Orm/Fixtures/policies.php';
+require_once \Composer\InstalledVersions::getInstallPath('tinvar/database') . '/tests/Orm/Fixtures/policies.php';
 require_once __DIR__ . '/Fixtures/app.php';
 
 describe('on Postgres', function () {

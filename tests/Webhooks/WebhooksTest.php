@@ -46,7 +46,7 @@ use Tinvar\Webhooks\WebhookSignature;
 
 use function Tinvar\Tests\Jobs\Fixtures\schemaOf;
 
-require_once __DIR__ . '/../../../framework/tests/Jobs/Fixtures/jobs.php';
+require_once \Composer\InstalledVersions::getInstallPath('tinvar/framework') . '/tests/Jobs/Fixtures/jobs.php';
 
 const KEY = 'webhooks-test-key-of-thirty-two-bytes';
 

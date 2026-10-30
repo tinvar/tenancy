@@ -39,7 +39,7 @@ use Tinvar\Tests\Orm\Fixtures\Hierarchy\Tenants;
 use Tinvar\Tests\Tenancy\Fixtures\Tree;
 use Tinvar\Tests\Orm\Fixtures\Script;
 
-require_once __DIR__ . '/../../../../database/tests/Orm/Fixtures/hierarchy.php';
+require_once \Composer\InstalledVersions::getInstallPath('tinvar/database') . '/tests/Orm/Fixtures/hierarchy.php';
 require_once __DIR__ . '/tree.php';
 
 /**

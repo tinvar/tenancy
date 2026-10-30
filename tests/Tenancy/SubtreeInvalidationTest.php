@@ -50,7 +50,7 @@ use Tinvar\Tests\Orm\Fixtures\Hierarchy\Tenants;
 use Tinvar\Tests\Tenancy\Fixtures\Tree;
 use Tinvar\Validation\Validator;
 
-require_once __DIR__ . '/../../../database/tests/Orm/Fixtures/hierarchy.php';
+require_once \Composer\InstalledVersions::getInstallPath('tinvar/database') . '/tests/Orm/Fixtures/hierarchy.php';
 require_once __DIR__ . '/Fixtures/tree.php';
 
 const KEY = 'subtree-invalidation-test-key-0123456789';

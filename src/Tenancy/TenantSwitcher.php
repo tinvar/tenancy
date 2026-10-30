@@ -39,7 +39,7 @@ use Tinvar\Orm\Orm;
  * Every refusal is the same 403, `tenant_switch_refused`, so a caller
  * cannot tell a tenant that exists elsewhere from one that exists nowhere.
  */
-final readonly class TenantSwitcher
+final readonly class TenantSwitcher implements TenantSwitching
 {
     private SubtreeMemberships $members;
 

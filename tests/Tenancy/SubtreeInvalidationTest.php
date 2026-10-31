@@ -137,6 +137,43 @@ final readonly class ScriptActions
         return ActionResult::revalidateTags('scripts');
     }
 
+    /** Renames every script so named across the subtree, by raw SQL (ADR 0122). */
+    #[Action, NoAuthorization(reason: 'fixture: exercises invalidation, not access control')]
+    public function rawRenameWithin(string $from, string $to): ActionResult
+    {
+        $this->orm->withinSubtree(fn (): int => $this->orm->connection()->execute('UPDATE scripts SET name = ? WHERE name = ?', [$to, $from]));
+
+        return ActionResult::revalidateTags('scripts');
+    }
+
+    /**
+     * Deletes every script so named, in any tenant, by raw SQL -- through a
+     * connection held from before the widening, or the ORM's own, or a
+     * DELETE inside a select(): refused, every way (ADR 0122).
+     */
+    #[Action, NoAuthorization(reason: 'fixture: exercises invalidation, not access control')]
+    public function rawDeleteAcross(string $name, string $how): ActionResult
+    {
+        $held = $this->orm->connection();
+        $this->orm->acrossTenants(fn (): mixed => match ($how) {
+            'held' => $held->execute('DELETE FROM scripts WHERE name = ?', [$name]),
+            'statements' => $this->orm->statements()->execute('DELETE FROM scripts WHERE name = ?', [$name]),
+            default => $held->select('WITH gone AS (DELETE FROM scripts WHERE name = ? RETURNING id) SELECT COUNT(*) AS n FROM gone', [$name]),
+        });
+
+        return ActionResult::revalidateTags('scripts');
+    }
+
+    /** Counts every tenant's scripts by raw SQL, and adds one as the tenant in force: a read is no write. */
+    #[Action, NoAuthorization(reason: 'fixture: exercises invalidation, not access control')]
+    public function rawCountAcross(string $name): ActionResult
+    {
+        $this->orm->acrossTenants(fn (): array => $this->orm->connection()->select('SELECT COUNT(*) AS n FROM scripts'));
+        $this->orm->connection()->execute('INSERT INTO scripts VALUES (?, ?, ?)', [Uuid::v7(), $name, $this->orm->tenant()]);
+
+        return ActionResult::revalidateTags('scripts');
+    }
+
     /** Deletes one script, in any tenant, by deleting its model. */
     #[Action, NoAuthorization(reason: 'fixture: exercises invalidation, not access control')]
     public function deleteModelAcross(string $id): ActionResult
@@ -449,6 +486,48 @@ describe('a widened write', function () {
         $world->widened('ScriptActions.renameWithin', ['from' => 'nobody-script', 'to' => 'renamed']);
 
         expect($stale($exact, $declaration))->toBe(['reseller']);
+    });
+
+    // ADR 0122: raw SQL names no rows to follow, so a raw write inside
+    // withinSubtree() names every tenant the widening let it reach.
+    it('tells every tenant of the subtree of a raw write inside withinSubtree(), and none outside it', function () use ($cached, $stale) {
+        $world = new World();
+        [$exact, $declaration, $listening] = $cached($world);
+
+        $told = $world->widened('ScriptActions.rawRenameWithin', ['from' => 'acme-west-script', 'to' => 'renamed']);
+
+        expect($stale($exact, $declaration))->toBe(['reseller', 'acme', 'acme-west', 'globex'])
+            ->and(array_intersect($listening['acme-west'], $told))->not->toBe([])
+            ->and(array_intersect($listening['other'], $told))->toBe([]);
+    });
+
+    // Inside acrossTenants() it may reach any tenant, which nothing can name.
+    it('refuses a raw write inside acrossTenants(), however the connection was held, writing nothing', function (string $how) use ($cached, $stale) {
+        $world = new World();
+        [$exact, $declaration] = $cached($world);
+
+        expect(fn () => $world->widened('ScriptActions.rawDeleteAcross', ['name' => 'other-script', 'how' => $how]))
+            ->toThrow(\LogicException::class, 'inside acrossTenants()')
+            ->and($world->orm->acrossTenants(fn (): array => $world->orm->connection()->select("SELECT name FROM scripts WHERE name = 'other-script'")))
+            ->toHaveCount(1)
+            ->and($stale($exact, $declaration))->toBe([]);
+    })->with(['held', 'statements', 'a DELETE in a select()']);
+
+    it('lets a raw read inside acrossTenants() through, and names the tenant in force for a write outside it', function () use ($cached, $stale) {
+        $world = new World();
+        [$exact, $declaration] = $cached($world);
+
+        $world->widened('ScriptActions.rawCountAcross', ['name' => 'counted']);
+
+        expect($stale($exact, $declaration))->toBe(['reseller']);
+    });
+
+    it('guards nothing outside an announcement: a job\'s raw write across tenants is its own', function () {
+        $world = new World();
+
+        expect($world->orm->actAs('reseller', fn (): int => $world->orm->acrossTenants(
+            fn (): int => $world->orm->connection()->execute("UPDATE scripts SET name = name WHERE name = 'other-script'"),
+        )))->toBe(1);
     });
 });
 

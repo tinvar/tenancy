@@ -158,6 +158,8 @@ final readonly class ScriptActions
         $this->orm->acrossTenants(fn (): mixed => match ($how) {
             'held' => $held->execute('DELETE FROM scripts WHERE name = ?', [$name]),
             'statements' => $this->orm->statements()->execute('DELETE FROM scripts WHERE name = ?', [$name]),
+            // The ORM's own package, passing on the caller's SQL: no exemption.
+            'schema' => new \Tinvar\Orm\Schema\Schema($held, new \Tinvar\Orm\Schema\SqliteDialect())->sql('DELETE FROM scripts WHERE name = ?', [$name]),
             default => $held->select('WITH gone AS (DELETE FROM scripts WHERE name = ? RETURNING id) SELECT COUNT(*) AS n FROM gone', [$name]),
         });
 
@@ -511,7 +513,7 @@ describe('a widened write', function () {
             ->and($world->orm->acrossTenants(fn (): array => $world->orm->connection()->select("SELECT name FROM scripts WHERE name = 'other-script'")))
             ->toHaveCount(1)
             ->and($stale($exact, $declaration))->toBe([]);
-    })->with(['held', 'statements', 'a DELETE in a select()']);
+    })->with(['held', 'statements', 'schema', 'a DELETE in a select()']);
 
     it('lets a raw read inside acrossTenants() through, and names the tenant in force for a write outside it', function () use ($cached, $stale) {
         $world = new World();

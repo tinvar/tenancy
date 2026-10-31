@@ -94,9 +94,11 @@ describe('a panel reaching its tenant\'s subtree', function () {
         $panels = new PanelContext();
         $cache = new QueryCache(new ArrayStore(), new AuthContext(), $panels);
         $declaration = new Query(cache: '1m');
+        // Granted as the Orm says, which the runner hands the cache: the one
+        // source the reads themselves are scoped by.
         $key = static fn (bool $subtree): string => $panels->within('reseller', static fn (): string => $panels->grantedWithin(
             new PanelBinding('reseller', subtree: $subtree),
-            static fn (): string => $cache->key('stats', $declaration, [], 'reseller'),
+            static fn (): string => $cache->key('stats', $declaration, [], 'reseller', $subtree),
         ));
 
         expect($key(true))->not->toBe($key(false))

@@ -537,17 +537,17 @@ describe('the tenants above a tenant', function () {
     it('walks them up from its parent to the root', function () {
         $tree = new TenantHierarchy(new Tree());
 
-        expect($tree->ancestors('acme-west'))->toBe(['acme', 'reseller'])
-            ->and($tree->ancestors('reseller'))->toBe([])
-            ->and($tree->ancestors('nobody'))->toBe([])
-            ->and($tree->ancestors(''))->toBe([]);
+        expect([...$tree->ancestors('acme-west')])->toBe(['acme', 'reseller'])
+            ->and([...$tree->ancestors('reseller')])->toBe([])
+            ->and([...$tree->ancestors('nobody')])->toBe([])
+            ->and([...$tree->ancestors('')])->toBe([]);
     });
 
     it('stops at a loop, keeping those found before it', function () {
         $loop = new Tree();
         $loop->parents = ['a' => 'b', 'b' => 'c', 'c' => 'a'];
 
-        expect(new TenantHierarchy($loop)->ancestors('a'))->toBe(['b', 'c']);
+        expect([...new TenantHierarchy($loop)->ancestors('a')])->toBe(['b', 'c']);
     });
 
     it('stops past the deepest a tree is walked', function () {
@@ -557,6 +557,6 @@ describe('the tenants above a tenant', function () {
             $deep->parents["t{$i}"] = 't' . ($i + 1);
         }
 
-        expect(new TenantHierarchy($deep)->ancestors('t0'))->toHaveCount(TenantHierarchy::MAX_DEPTH);
+        expect([...new TenantHierarchy($deep)->ancestors('t0')])->toHaveCount(TenantHierarchy::MAX_DEPTH);
     });
 });

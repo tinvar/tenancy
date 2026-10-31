@@ -19,6 +19,7 @@ final readonly class NoHierarchy implements TenantSubtrees
         return false;
     }
 
+    /** @return list<string> */
     public function ancestors(string $tenant): array
     {
         return [];

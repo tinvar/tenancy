@@ -8,8 +8,9 @@ use Tinvar\Orm\TenantBounds;
 use Tinvar\Orm\TenantSubtrees;
 
 /**
- * The application's TenantTree, read with limits: whether one tenant is in
- * another's subtree, the whole of a subtree, and the tenants above one.
+ * The application's TenantTree, read with limits: the whole of a subtree,
+ * and the tenants above one -- whether one tenant is in another's subtree
+ * is the Orm's to answer from them (TenantBounds::contains()).
  *
  * Both fail closed. A walk up from a tenant that loops, or goes deeper than
  * any real hierarchy would, says the tenant is not under the root -- a
@@ -40,63 +41,32 @@ final readonly class TenantHierarchy implements TenantSubtrees
     }
 
     /**
-     * Whether $tenant is $root or below it.
+     * Every tenant above $tenant, its parent first, walked up one parent
+     * at a time as it is read: the Orm's contains() reads it as far as the
+     * root it asks about, so a check costs the tenant's depth below that
+     * root, never the size of its subtree nor the chain above it; the
+     * query cache reads it whole, for the tenants whose reads across their
+     * subtree a write made as $tenant has to reach.
      *
-     * Walked up from $tenant, one parent at a time, so the answer costs the
-     * tenant's depth and never the size of $root's subtree.
+     * Stopped at a loop, or past MAX_DEPTH, keeping what it found before:
+     * an answer that reaches too few tenants leaves a page stale, and
+     * never shows anyone a row.
+     *
+     * @return \Generator<int, string>
      */
-    public function contains(string $root, string $tenant): bool
+    public function ancestors(string $tenant): \Generator
     {
-        if ($root === '' || $tenant === '') {
-            return false;
-        }
-
-        $seen = [];
-        $current = $tenant;
-        for ($depth = 0; $depth <= self::MAX_DEPTH; $depth++) {
-            if ($current === $root) {
-                return true;
-            }
-
-            $seen[$current] = true;
-            $parent = $this->tree->parentOf($current);
-            if ($parent === null || $parent === '' || isset($seen[$parent])) {
-                return false;
-            }
-            $current = $parent;
-        }
-
-        return false;
-    }
-
-    /**
-     * Every tenant above $tenant, its parent first.
-     *
-     * The tenants whose reads across their subtree a write made as $tenant
-     * has to reach: the query cache keeps its tags by them. Walked up as
-     * contains() walks, and stopped where contains() would stop -- at a
-     * loop, or past MAX_DEPTH -- keeping what it found before: an answer
-     * that reaches too few tenants leaves a page stale, and never shows
-     * anyone a row.
-     *
-     * @return list<string>
-     */
-    public function ancestors(string $tenant): array
-    {
-        $above = [];
         $seen = [$tenant => true];
         $current = $tenant;
         for ($depth = 0; $tenant !== '' && $depth < self::MAX_DEPTH; $depth++) {
             $parent = $this->tree->parentOf($current);
             if ($parent === null || $parent === '' || isset($seen[$parent])) {
-                break;
+                return;
             }
             $seen[$parent] = true;
-            $above[] = $parent;
+            yield $parent;
             $current = $parent;
         }
-
-        return $above;
     }
 
     /**

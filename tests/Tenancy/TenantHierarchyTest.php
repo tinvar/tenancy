@@ -41,8 +41,10 @@ function treeOf(\Closure $parentOf, \Closure $descendantsOf): TenantHierarchy
     });
 }
 
+// Asked as the Orm asks it: through TenantBounds, the checked tree every
+// caller of contains() is handed (Orm::tenants()).
 it('places a tenant under its parent and every ancestor, and nowhere else', function () {
-    $tenants = new TenantHierarchy(new Tree());
+    $tenants = new TenantBounds(new TenantHierarchy(new Tree()));
 
     expect($tenants->contains('reseller', 'acme-west'))->toBeTrue()
         ->and($tenants->contains('acme', 'acme-west'))->toBeTrue()
@@ -53,27 +55,35 @@ it('places a tenant under its parent and every ancestor, and nowhere else', func
         ->and($tenants->contains('reseller', 'nobody'))->toBeFalse()
         ->and($tenants->contains('', 'acme'))->toBeFalse()
         ->and($tenants->contains('reseller', ''))->toBeFalse()
-        ->and($tenants->ancestors('acme-west'))->toBe(['acme', 'reseller']);
+        ->and([...new TenantHierarchy(new Tree())->ancestors('acme-west')])->toBe(['acme', 'reseller']);
 });
 
-// Walked up from the tenant, so the answer costs its depth, not the size of
-// the subtree it is asked about.
-it('answers by walking up from the tenant, one parent at a time', function () {
+// Walked up from the tenant and stopped at the root asked about, so the
+// answer costs the tenant's depth below it, not the size of the subtree
+// nor the rest of the chain above. TenantHierarchy kept a contains() that
+// did, which nothing called, while the checked tree walked every ancestor.
+it('answers by walking up from the tenant, as far as the root and no further', function () {
     $tree = new Tree();
+    $tenants = new TenantBounds(new TenantHierarchy($tree));
 
-    new TenantHierarchy($tree)->contains('reseller', 'acme-west');
+    $tenants->contains('acme', 'acme-west');
+    $toParent = $tree->asked;
+    $tenants->contains('reseller', 'acme-west');
 
-    expect($tree->asked)->toBe(2);
+    expect($toParent)->toBe(1)
+        ->and($tree->asked - $toParent)->toBe(2)
+        ->and(method_exists(TenantHierarchy::class, 'contains'))->toBeFalse();
 });
 
 it('refuses rather than admits on a tree that loops or goes deeper than any real one', function () {
     $loop = treeOf(static fn (string $t): string => $t === 'a' ? 'b' : 'a', static fn (): array => []);
     $deep = treeOf(static fn (string $t): ?string => $t === 'level-0' ? null : 'level-' . ((int) substr($t, 6) - 1), static fn (): array => []);
 
-    expect($loop->contains('root', 'a'))->toBeFalse()
-        ->and($loop->ancestors('a'))->toBe(['b'])
-        ->and($deep->contains('level-0', 'level-' . TenantHierarchy::MAX_DEPTH))->toBeTrue()
-        ->and($deep->contains('level-0', 'level-' . (TenantHierarchy::MAX_DEPTH + 1)))->toBeFalse();
+    expect(new TenantBounds($loop)->contains('root', 'a'))->toBeFalse()
+        ->and([...$loop->ancestors('a')])->toBe(['b'])
+        ->and(new TenantBounds($deep)->contains('level-0', 'level-' . TenantHierarchy::MAX_DEPTH))->toBeTrue()
+        ->and(new TenantBounds($deep)->contains('level-0', 'level-' . (TenantHierarchy::MAX_DEPTH + 1)))->toBeFalse()
+        ->and(\count([...$deep->ancestors('level-' . (TenantHierarchy::MAX_DEPTH + 5))]))->toBe(TenantHierarchy::MAX_DEPTH);
 });
 
 it('gives a subtree root first, each tenant once', function () {

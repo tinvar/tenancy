@@ -49,6 +49,13 @@ use Tinvar\Tenancy\Host;
 use Tinvar\Tenancy\Subdomains;
 use Tinvar\Tenancy\Tenancy;
 use Tinvar\Tenancy\TenantHosts;
+use Tinvar\Tenancy\TenantSessions;
+use Tinvar\Tenancy\TenantSwitcher;
+use Tinvar\Auth\Membership;
+use Tinvar\Auth\Memberships;
+use Tinvar\Auth\TenantMemberships;
+use Tinvar\Identity\Realm;
+use Tinvar\Identity\Realms;
 
 /**
  * A multi-tenant application that routes by host (ADR 0149), what the shop
@@ -323,6 +330,73 @@ final readonly class RenameNotes
     }
 }
 
+/** m-1 is a customer of acme, globex and initech -- and of nothing else. */
+final class Customers implements Memberships, TenantMemberships
+{
+    public function membership(Authenticatable $user, string $panel, string $tenant): ?Membership
+    {
+        return $user->authIdentifier() === 'm-1' && $panel === 'customer' && \in_array($tenant, ['acme', 'globex', 'initech'], true)
+            ? new Membership('customer')
+            : null;
+    }
+
+    public function tenantsOf(Authenticatable $user, string $panel): array
+    {
+        return $user->authIdentifier() === 'm-1' && $panel === 'customer' ? ['acme', 'globex', 'initech'] : [];
+    }
+}
+
+/** A switch's last step: a new session, as an application keeping sessions takes it. */
+final class Sessions implements TenantSessions
+{
+    /** @var list<string> the tenant each switch moved to */
+    public array $switched = [];
+
+    public function switchTo(Request $request, Authenticatable $user, string $tenant): string
+    {
+        $this->switched[] = $tenant;
+
+        return 'session-after-' . $tenant;
+    }
+}
+
+/** The application's own switch page's action and query, as TenantSwitcher's docs have them. */
+final readonly class SwitchTenant
+{
+    public function __construct(private TenantSwitcher $switcher) {}
+
+    #[Action, NoAuthorization(reason: 'TenantSwitcher checks the membership itself')]
+    public function to(string $tenant, Request $request): ActionResult
+    {
+        return ActionResult::ok($this->switcher->switch($request, $tenant, 'customer'));
+    }
+
+    #[Action, NoAuthorization(reason: 'TenantSwitcher checks the membership itself')]
+    public function choices(Request $request): ActionResult
+    {
+        return ActionResult::ok($this->switcher->choices($request, 'customer'));
+    }
+}
+
+/**
+ * The application's hosts, as realms: the platform's apex, where every
+ * tenant of a user's may be switched to; each subdomain, its tenant's; and
+ * initech's custom domain, held to initech's subtree.
+ */
+function realms(): Realms
+{
+    return new Realms(
+        Realm::platform('https://' . ROOT),
+        [Realm::platform('https://admin.' . ROOT, panel: 'admin')],
+        static fn (string $host): ?Realm => match ($host) {
+            'acme.' . ROOT => Realm::platform('https://acme.' . ROOT, 'acme'),
+            'globex.' . ROOT => Realm::platform('https://globex.' . ROOT, 'globex'),
+            'initech.io' => Realm::domain('https://initech.io', 'initech', 'customer'),
+            default => null,
+        },
+    );
+}
+
 #[Query(name: 'notes.bodies'), TenantFrom(Host::class), NoAuthorization(reason: 'a fixture listing its tenant\'s notes')]
 final readonly class NoteBodies
 {
@@ -346,6 +420,7 @@ final class App
     public readonly AuthContext $auth;
     public readonly Signer $routeSigner;
     public readonly Directory $directory;
+    public readonly Sessions $sessions;
 
     /** @var list<array{route: string, tenant: string}> */
     public array $rerendered = [];
@@ -364,13 +439,23 @@ final class App
         $this->directory = new Directory();
         $panels = new PanelContext();
 
-        $container = new Container()->instance(TenantHosts::class, $this->directory);
+        $this->sessions = new Sessions();
+        $container = new Container()
+            ->instance(TenantHosts::class, $this->directory)
+            ->instance(TenantSwitcher::class, new TenantSwitcher(
+                $this->orm,
+                $this->auth,
+                new Customers(),
+                $this->sessions,
+                static fn (Request $r): string => SESSION,
+                realms(),
+            ));
 
         $routes = new RouteRegistry();
         $routes->registerAll([TenantNotes::class, TenantNote::class, TenantRaw::class, Home::class, PlatformNotes::class, AdminHome::class]);
 
         $actions = new ActionRegistry($container->resolver());
-        $actions->registerAll([NoteActions::class, RenameNotes::class]);
+        $actions->registerAll([NoteActions::class, RenameNotes::class, SwitchTenant::class]);
 
         $queries = new QueryRegistry($container->resolver());
         $queries->registerAll([NoteBodies::class, CachedNoteBodies::class]);

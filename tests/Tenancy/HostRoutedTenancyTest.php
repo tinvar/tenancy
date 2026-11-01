@@ -33,6 +33,7 @@ use Tinvar\Tests\Tenancy\Fixtures\Domains\SignIn;
 
 use const Tinvar\Tests\Tenancy\Fixtures\Domains\PROXY;
 use const Tinvar\Tests\Tenancy\Fixtures\Domains\PROXY_SECRET;
+use const Tinvar\Tests\Tenancy\Fixtures\Domains\ROOT;
 
 require_once \Composer\InstalledVersions::getInstallPath('tinvar/database') . '/tests/Orm/Fixtures/databases.php';
 require_once __DIR__ . '/Fixtures/domains_app.php';
@@ -353,4 +354,61 @@ describe('a worker on Postgres, with row-level security', function () {
             }
         });
     })->group('pgsql')->skip(Databases::postgresMissing() !== null, Databases::postgresMissing() ?? '');
+});
+
+describe('a tenant switch, through the application\'s own action', function () {
+    it('offers every tenant of the user\'s on the apex, and only the domain\'s on a custom domain', function () {
+        $app = app();
+        $choices = static fn (string $host): mixed => App::json($app->post('/_action/SwitchTenant.choices', $host))['value'] ?? null;
+
+        expect($choices(ROOT))->toBe(['acme', 'globex', 'initech'])
+            ->and($choices('initech.io'))->toBe(['initech'])
+            ->and($choices('acme.example.test'))->toBe(['acme']);
+    });
+
+    it('moves the session into a new one for a tenant in the host\'s subtree, and refuses any other with one 403', function () {
+        $app = app();
+        $switch = static fn (string $host, string $tenant) => $app->post('/_action/SwitchTenant.to', $host, ['tenant' => $tenant]);
+
+        $fromApex = $switch(ROOT, 'globex');
+        $offDomain = $switch('initech.io', 'acme');
+        $offSubdomain = $switch('acme.example.test', 'globex');
+        $nowhere = $switch(ROOT, 'umbrella');
+
+        expect($fromApex->status)->toBe(200, $fromApex->body())
+            ->and(App::json($fromApex)['value'])->toBe('session-after-globex')
+            ->and([$offDomain->status, App::json($offDomain)['error']['code'] ?? null])->toBe([403, 'tenant_switch_refused'])
+            ->and([$offSubdomain->status, App::json($offSubdomain)['error']['code'] ?? null])->toBe([403, 'tenant_switch_refused'])
+            ->and([$nowhere->status, App::json($nowhere)['error']['code'] ?? null])->toBe([403, 'tenant_switch_refused'])
+            ->and($app->sessions->switched)->toBe(['globex']);
+    });
+
+    it('reads the realm from the host the proxy proved, not a Host header behind it', function () {
+        $app = app();
+
+        $response = $app->kernel->handle(
+            new \Tinvar\Http\Request(
+                'POST',
+                '/_action/SwitchTenant.to',
+                [
+                    'host' => ROOT,
+                    'x-forwarded-host' => 'initech.io',
+                    TrustedProxies::SECRET_HEADER => PROXY_SECRET,
+                    'origin' => 'https://initech.io',
+                    'content-type' => 'application/json',
+                    'accept' => 'application/json',
+                    'x-xsrf-token' => 'csrf',
+                ],
+                [],
+                [],
+                ['__Host-XSRF-TOKEN' => 'csrf'],
+                remoteAddress: PROXY,
+            ),
+            static fn (): \Tinvar\Http\Response => \Tinvar\Http\Response::make(500, 'not a page'),
+            json_encode(['tenant' => 'acme'], JSON_THROW_ON_ERROR),
+        );
+
+        expect([$response->status, App::json($response)['error']['code'] ?? null])->toBe([403, 'tenant_switch_refused'])
+            ->and($app->sessions->switched)->toBe([]);
+    });
 });

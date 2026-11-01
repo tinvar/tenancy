@@ -6,11 +6,14 @@ namespace Tinvar\Tenancy;
 
 use Tinvar\Http\HostName;
 use Tinvar\Http\Request;
+use Tinvar\Routing\HostMatch;
 
 /**
  * The tenant a request's host belongs to: `#[TenantFrom(Host::class)]`.
  *
- * Read from the Host header the server received, never X-Forwarded-Host:
+ * Read from the host the application resolved (HostMatch, ADR 0149) where
+ * it routes by host, and otherwise from the Host header the server
+ * received -- never a client's X-Forwarded-Host:
  * that is whatever the client chose to send unless a proxy you control
  * overwrote it, and the proxy in front of the application is what decides
  * which hosts reach it at all.
@@ -35,7 +38,12 @@ final readonly class Host implements SubtreeSource
 
     public function tenantFor(Request $request): ?string
     {
-        $host = HostName::normalize($request->header('host') ?? '');
+        // The host the application resolved, where it routes by host --
+        // through a pinned proxy's X-Forwarded-Host, if it has one -- so a
+        // route's {tenant}.{root} and this source read the one host, and
+        // cannot disagree about whose request it is (ADR 0149).
+        $resolved = HostMatch::of($request)?->host;
+        $host = $resolved !== null && $resolved !== '' ? $resolved : HostName::normalize($request->header('host') ?? '');
         if ($host === null) {
             return null;
         }

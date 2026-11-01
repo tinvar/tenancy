@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace Tinvar\Tenancy;
 
+use Tinvar\Http\HostName;
 use Tinvar\Http\Request;
+use Tinvar\Routing\HostMatch;
 use Tinvar\Support\Signer;
 
 /**
@@ -25,6 +27,15 @@ use Tinvar\Support\Signer;
  * The method is not signed: a link is followed with GET, and a webhook's
  * URL is configured once and POSTed to. A route that must refuse one of
  * those says so with the methods it answers.
+ *
+ * The host is (ADR 0149): every token is its host's, and a signed URL, which
+ * names its tenant with no session behind it, more than most. Where the
+ * application routes by host, a URL is signed for the host it is opened on
+ * (`sign(..., host:)`) and verified against the host the Kernel resolved
+ * for the request, so a link signed on acme's subdomain opens nothing on
+ * globex's. One signed for no host -- every URL signed before the host was
+ * -- verifies only where the application routes on no host, and is refused
+ * wherever it does: such a link is signed again, on its host.
  */
 final readonly class SignedUrls
 {
@@ -47,9 +58,18 @@ final readonly class SignedUrls
      * A same-origin URL for $path, as $tenant, valid for $ttl seconds.
      *
      * @param array<string, string|int> $query the rest of the query, signed with it
+     * @param string $host the host it is opened on, where the application routes by host --
+     *        as the Kernel resolves it, without a port; '' for none, where it routes on none
      */
-    public function sign(string $path, string $tenant, array $query = [], int $ttl = self::DEFAULT_TTL, ?int $now = null): string
+    public function sign(string $path, string $tenant, array $query = [], int $ttl = self::DEFAULT_TTL, ?int $now = null, string $host = ''): string
     {
+        if ($host !== '') {
+            $named = str_contains($host, ':') ? null : (HostName::normalize($host) ?? (filter_var($host, FILTER_VALIDATE_IP) === false ? null : $host));
+            if ($named === null) {
+                throw new \InvalidArgumentException("'{$host}' is not a host a signed URL can be opened on: a host name or an address, with no port.");
+            }
+            $host = $named;
+        }
         if ($tenant === '') {
             throw new \InvalidArgumentException('A signed URL names a tenant; an empty one would be no tenant at all.');
         }
@@ -75,14 +95,15 @@ final readonly class SignedUrls
         $query = array_map('strval', $query);
         $query[self::TENANT] = $tenant;
         $query[self::EXPIRES] = (string) (($now ?? time()) + $ttl);
-        $query[self::SIGNATURE] = Signer::encode($this->signer->sign(self::payload($path, $query)));
+        $query[self::SIGNATURE] = Signer::encode($this->signer->sign(self::payload($path, $query, $host)));
 
         return $path . '?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
     }
 
     /**
      * The tenant a request's URL was signed for, or null: unsigned, edited,
-     * expired, or signed with another key.
+     * expired, signed with another key, or signed for another host than the
+     * one the Kernel resolved for it -- no host, where it resolved one.
      */
     public function tenantOf(Request $request, ?int $now = null): ?string
     {
@@ -99,7 +120,7 @@ final readonly class SignedUrls
         // The signature first, then the expiry: an edited expiry is a
         // forgery, and is reported as one rather than as a lapse.
         $mac = Signer::decode($signature);
-        if ($mac === null || !$this->signer->verify(self::payload($request->path, $query), $mac)) {
+        if ($mac === null || !$this->signer->verify(self::payload($request->path, $query, HostMatch::hostOf($request)), $mac)) {
             return null;
         }
 
@@ -107,17 +128,19 @@ final readonly class SignedUrls
     }
 
     /**
-     * What is signed: the path and every query parameter but the signature,
-     * by name, so the order a client sends them in does not matter and
-     * adding one is an edit like any other.
+     * What is signed: the host, where there is one, the path and every
+     * query parameter but the signature, by name, so the order a client
+     * sends them in does not matter and adding one is an edit like any
+     * other. With no host, exactly what was signed before the host was: a
+     * path starts with `/`, so no payload with a host is one without.
      *
      * @param array<string, mixed> $query
      */
-    private static function payload(string $path, array $query): string
+    private static function payload(string $path, array $query, string $host = ''): string
     {
         unset($query[self::SIGNATURE]);
         ksort($query, SORT_STRING);
 
-        return $path . "\n" . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
+        return ($host === '' ? '' : 'host:' . $host . "\n") . $path . "\n" . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
     }
 }

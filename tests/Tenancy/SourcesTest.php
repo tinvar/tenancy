@@ -186,6 +186,36 @@ describe('a signed URL', function () {
             ->and($urls()->tenantOf(new Request('GET', '/exports/43', [], $query)))->toBeNull();
     });
 
+    // Every token is its host's (ADR 0149). A signed URL names its tenant
+    // with no session behind it, so the host it was signed for is signed
+    // with it: acme's link opens nothing on globex's subdomain.
+    it('is its host\'s where the application routes by host', function () use ($urls) {
+        $on = static fn (string $host, array $query): Request => new Request('GET', '/exports/42', ['host' => $host], $query)
+            ->withAttribute(\Tinvar\Routing\HostMatch::ATTRIBUTE, new \Tinvar\Routing\HostMatch('{account}.{root}', $host, ['account' => explode('.', $host)[0]]));
+        $query = queryOf($urls()->sign('/exports/42', 'acme', ['format' => 'csv'], host: 'ACME.shop.test.'));
+
+        expect($urls()->tenantOf($on('acme.shop.test', $query)))->toBe('acme')
+            ->and($urls()->tenantOf($on('globex.shop.test', $query)))->toBeNull()
+            // Signed for a host, and read where no host is routed: not this one.
+            ->and($urls()->tenantOf(new Request('GET', '/exports/42', [], $query)))->toBeNull();
+    });
+
+    // The migration: a URL signed before the host was, naming none, still
+    // opens where the application routes on no host, and nowhere it does.
+    it('refuses one signed for no host where the application routes by host, and takes it where it does not', function () use ($urls) {
+        $query = queryOf($urls()->sign('/exports/42', 'acme'));
+        $routed = new Request('GET', '/exports/42', ['host' => 'shop.test'], $query)
+            ->withAttribute(\Tinvar\Routing\HostMatch::ATTRIBUTE, new \Tinvar\Routing\HostMatch(null, 'shop.test'));
+
+        expect($urls()->tenantOf($routed))->toBeNull()
+            ->and($urls()->tenantOf(new Request('GET', '/exports/42', ['host' => 'shop.test'], $query)))->toBe('acme');
+    });
+
+    it('refuses to sign for what is not a host', function () use ($urls) {
+        expect(fn () => $urls()->sign('/exports/42', 'acme', host: 'shop.test/evil'))->toThrow(\InvalidArgumentException::class)
+            ->and(fn () => $urls()->sign('/exports/42', 'acme', host: 'shop.test:8443'))->toThrow(\InvalidArgumentException::class);
+    });
+
     it('refuses one past its expiry, and one whose expiry was moved', function () use ($urls) {
         $url = $urls()->sign('/exports/42', 'acme', ttl: 60, now: 1_000_000);
         $query = queryOf($url);

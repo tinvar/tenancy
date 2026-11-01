@@ -6,6 +6,7 @@ namespace Tinvar\Tenancy;
 
 use Tinvar\Http\HostName;
 use Tinvar\Http\Request;
+use Tinvar\Http\TenantFromHost;
 use Tinvar\Routing\HostMatch;
 
 /**
@@ -33,7 +34,7 @@ use Tinvar\Routing\HostMatch;
  * lookups an attacker can tell apart. Anything that is not a host name --
  * an address literal, a stray character -- belongs to no tenant.
  */
-final readonly class Host implements SubtreeSource
+final readonly class Host implements SubtreeSource, TenantFromHost
 {
     public function __construct(private TenantHosts $hosts) {}
 

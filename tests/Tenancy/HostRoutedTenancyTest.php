@@ -214,6 +214,38 @@ describe('behind a pinned proxy', function () {
     });
 });
 
+describe('a route on a {tenant} host', function () {
+    it('is refused when the Kernel is built unless it reads its tenant from the host', function (array $routes, array $actions, string $where, string $from) {
+        expect(fn () => new App(new Database()->connection, routes: $routes, actions: $actions))
+            ->toThrow(\InvalidArgumentException::class, "{$where} is on {tenant}.{root}, whose {tenant} names the tenant, and it reads its tenant from {$from}");
+    })->with([
+        'a page reading none, as the session\'s tenant' => [[\Tinvar\Tests\Tenancy\Fixtures\Domains\LeakyNotes::class], [], 'LeakyNotes', 'nowhere, so it runs as the tenant the session holds'],
+        'a page reading a signed link' => [[\Tinvar\Tests\Tenancy\Fixtures\Domains\SignedNotes::class], [], 'SignedNotes', 'Tinvar\\Tenancy\\Signature'],
+        'an action reading none' => [[], [\Tinvar\Tests\Tenancy\Fixtures\Domains\LeakyActions::class], 'LeakyActions::leak()', 'nowhere'],
+    ]);
+
+    it('says how to fix it', function () {
+        expect(fn () => new App(new Database()->connection, routes: [\Tinvar\Tests\Tenancy\Fixtures\Domains\LeakyNotes::class]))
+            ->toThrow(\InvalidArgumentException::class, 'Declare #[TenantFrom(Host::class)] (tinvar/tenancy) on it or a layout above it');
+    });
+
+    it('is reported by tinvar check', function () {
+        $domains = new \Tinvar\Routing\Domains(['root' => ROOT]);
+        $leaky = \Tinvar\Console\AppConsole::hostViolations([\Tinvar\Tests\Tenancy\Fixtures\Domains\LeakyNotes::class], [], [], $domains);
+        $fine = \Tinvar\Console\AppConsole::hostViolations([\Tinvar\Tests\Tenancy\Fixtures\Domains\TenantNotes::class], [], [], $domains);
+
+        expect($leaky)->toHaveCount(1)
+            ->and($leaky[0]->rule)->toBe(\Tinvar\Console\AppConsole::TENANT_HOST_READS_HOST)
+            ->and($leaky[0]->where)->toBe(\Tinvar\Tests\Tenancy\Fixtures\Domains\LeakyNotes::class)
+            ->and($leaky[0]->message)->toContain('Declare #[TenantFrom(Host::class)]')
+            ->and($fine)->toBe([]);
+    });
+
+    it('is built when it reads its tenant from the host', function () {
+        expect(app()->kernel)->toBeInstanceOf(\Tinvar\Http\Kernel::class);
+    });
+});
+
 describe('a session\'s tenant', function () {
     it('goes on on its own host, and is refused on another tenant\'s', function () {
         $app = app(global: [SignIn::class, SessionTenant::class]);

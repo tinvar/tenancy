@@ -254,6 +254,37 @@ final readonly class TenantRaw
 }
 
 /** The platform's home, on the apex and on www. */
+/** On a tenant's host, reading no tenant from it: it would run as the session's tenant. */
+#[Page('/leaky', view: 'tenant/leaky', name: 'tenant.leaky'), Domain('{tenant}.{root}')]
+final readonly class LeakyNotes
+{
+    public function __invoke(string $tenant): TextData
+    {
+        return new TextData($tenant);
+    }
+}
+
+/** On a tenant's host, reading its tenant from a signed link rather than the host. */
+#[Page('/signed', view: 'tenant/signed', name: 'tenant.signed'), Domain('{tenant}.{root}'), TenantFrom(\Tinvar\Tenancy\Signature::class)]
+final readonly class SignedNotes
+{
+    public function __invoke(string $tenant): TextData
+    {
+        return new TextData($tenant);
+    }
+}
+
+/** An action on a tenant's host, reading no tenant from it. */
+#[Domain('{tenant}.{root}')]
+final readonly class LeakyActions
+{
+    #[Action(name: 'notes.leak'), NoAuthorization(reason: 'a fixture refused before it runs')]
+    public function leak(): \Tinvar\Actions\ActionResult
+    {
+        return \Tinvar\Actions\ActionResult::ok();
+    }
+}
+
 #[Page('/', view: 'home', name: 'home')]
 final class Home
 {
@@ -431,7 +462,11 @@ final class App
     /**
      * @param list<class-string<Middleware>> $global
      */
-    public function __construct(Connection $connection, array $global = [SignIn::class], ?string $proxySecret = PROXY_SECRET)
+    /**
+     * @param list<class-string> $routes pages and layouts beside the fixture's own
+     * @param list<class-string> $actions action holders beside the fixture's own
+     */
+    public function __construct(Connection $connection, array $global = [SignIn::class], ?string $proxySecret = PROXY_SECRET, array $routes = [], array $actions = [])
     {
         $this->orm = new Orm($connection, new IdentityMap('domains-test'), Tenancy::tree());
         $this->auth = new AuthContext();
@@ -451,11 +486,13 @@ final class App
                 realms(),
             ));
 
+        $extraRoutes = $routes;
         $routes = new RouteRegistry();
-        $routes->registerAll([TenantNotes::class, TenantNote::class, TenantRaw::class, Home::class, PlatformNotes::class, AdminHome::class]);
+        $routes->registerAll([TenantNotes::class, TenantNote::class, TenantRaw::class, Home::class, PlatformNotes::class, AdminHome::class, ...$extraRoutes]);
 
+        $extraActions = $actions;
         $actions = new ActionRegistry($container->resolver());
-        $actions->registerAll([NoteActions::class, RenameNotes::class, SwitchTenant::class]);
+        $actions->registerAll([NoteActions::class, RenameNotes::class, SwitchTenant::class, ...$extraActions]);
 
         $queries = new QueryRegistry($container->resolver());
         $queries->registerAll([NoteBodies::class, CachedNoteBodies::class]);

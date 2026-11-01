@@ -12,11 +12,12 @@ use Tinvar\Routing\HostMatch;
  * The tenant a request's host belongs to: `#[TenantFrom(Host::class)]`.
  *
  * Read from the host the application resolved (HostMatch, ADR 0149) where
- * it routes by host, and otherwise from the Host header the server
- * received -- never a client's X-Forwarded-Host:
- * that is whatever the client chose to send unless a proxy you control
- * overwrote it, and the proxy in front of the application is what decides
- * which hosts reach it at all.
+ * it routes by host -- the Host header, or X-Forwarded-Host from a pinned
+ * proxy that, given TINVAR_TRUSTED_PROXY_SECRET, proves itself with it --
+ * and otherwise from the Host header the server received. Never a client's
+ * own X-Forwarded-Host: that is whatever the client chose to send unless a
+ * proxy you control overwrote it, and the proxy in front of the
+ * application is what decides which hosts reach it at all.
  *
  * A host is a claim, not a credential -- anyone can send any Host header --
  * so what it settles is which tenant's data the request may see, and no

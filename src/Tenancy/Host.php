@@ -44,7 +44,16 @@ final readonly class Host implements SubtreeSource
         // cannot disagree about whose request it is: that host and nothing
         // else, none resolved being none, whatever the Host header behind
         // it says (ADR 0149).
+        //
+        // A host the application keeps for itself -- the primary host and its
+        // aliases, a host a pattern names exactly, `admin.{root}` -- is the
+        // platform's and no tenant's: a tenant that signed up as `www` or
+        // `admin` is not the tenant of the platform's own `www.` or the
+        // staff's `admin.`, which a subdomain lookup would have made it.
         $resolved = HostMatch::of($request);
+        if ($resolved?->isFixed() === true) {
+            return null;
+        }
         $host = $resolved !== null ? ($resolved->host === '' ? null : $resolved->host) : HostName::normalize($request->header('host') ?? '');
         if ($host === null) {
             return null;

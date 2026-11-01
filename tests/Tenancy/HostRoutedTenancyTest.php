@@ -152,6 +152,26 @@ describe('the platform\'s own hosts', function () {
             ->and(App::json($response)['error']['code'])->toBe('tenant_unknown');
     });
 
+    // A slug is chosen at sign-up. One that spells a host the platform keeps
+    // -- www, answered as the apex; admin, the staff's -- names that host's
+    // tenant nowhere: the host is the platform's, and an action or a query
+    // answered there runs as nobody.
+    it('places a request on www, the apex\'s alias, in no tenant, whoever holds the slug www', function () {
+        $app = app();
+
+        expect(status($app, '/notes', 'www.example.test'))->toBe(404)
+            ->and($app->post('/_query/notes.bodies', 'www.example.test', ['args' => new \stdClass()])->status)->toBe(404);
+    });
+
+    it('places a call on the staff\'s host in no tenant, whoever holds the slug admin', function () {
+        $database = new Database();
+        $app = app($database);
+
+        expect($app->post('/_query/notes.bodies', 'admin.example.test', ['args' => new \stdClass()])->status)->toBe(404)
+            ->and($app->post('/_action/NoteActions.touch', 'admin.example.test', ['note' => $database->notes['tenant-admin'][0]])->status)->toBe(404)
+            ->and(page($app, '/', 'admin.example.test'))->toBe(['text' => 'staff']);
+    });
+
     it('serves a tenant\'s pages on none of the platform\'s hosts', function () {
         expect(status(app(), '/raw', 'admin.example.test'))->toBe(404)
             ->and(status(app(), '/raw', 'example.test'))->toBe(404);

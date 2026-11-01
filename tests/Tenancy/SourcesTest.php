@@ -85,6 +85,21 @@ describe('a host', function () {
         expect($source->tenantFor(hostRequest('acme.test')))->toBeNull();
     });
 
+    // Where the application routes by host, the host it resolved is the
+    // one answer: none resolved is no tenant, whatever the Host header says.
+    it('reads the resolved host alone where there is one', function () {
+        $source = new Host(new class implements TenantHosts {
+            public function tenantForHost(string $host): ?string
+            {
+                return $host === 'acme.test' ? 'acme' : null;
+            }
+        });
+        $request = hostRequest('acme.test');
+
+        expect($source->tenantFor($request->withAttribute(\Tinvar\Routing\HostMatch::ATTRIBUTE, new \Tinvar\Routing\HostMatch(null, ''))))->toBeNull()
+            ->and($source->tenantFor($request))->toBe('acme');
+    });
+
     // X-Forwarded-Host is whatever the client sent.
     it('ignores a forwarded host', function () {
         $source = new Host(new class implements TenantHosts {

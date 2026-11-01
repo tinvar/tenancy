@@ -41,9 +41,11 @@ final readonly class Host implements SubtreeSource
         // The host the application resolved, where it routes by host --
         // through a pinned proxy's X-Forwarded-Host, if it has one -- so a
         // route's {tenant}.{root} and this source read the one host, and
-        // cannot disagree about whose request it is (ADR 0149).
-        $resolved = HostMatch::of($request)?->host;
-        $host = $resolved !== null && $resolved !== '' ? $resolved : HostName::normalize($request->header('host') ?? '');
+        // cannot disagree about whose request it is: that host and nothing
+        // else, none resolved being none, whatever the Host header behind
+        // it says (ADR 0149).
+        $resolved = HostMatch::of($request);
+        $host = $resolved !== null ? ($resolved->host === '' ? null : $resolved->host) : HostName::normalize($request->header('host') ?? '');
         if ($host === null) {
             return null;
         }

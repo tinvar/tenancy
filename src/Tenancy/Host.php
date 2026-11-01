@@ -64,13 +64,4 @@ final readonly class Host implements SubtreeSource
 
         return $tenant === '' ? null : $tenant;
     }
-
-    /**
-     * The host name a Host header names, normalized; null for anything that
-     * is not one. HostName's, kept here for the code that called it here.
-     */
-    public static function normalize(string $header): ?string
-    {
-        return HostName::normalize($header);
-    }
 }

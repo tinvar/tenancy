@@ -32,24 +32,6 @@ function queryOf(string $url): array
 }
 
 describe('a host', function () {
-    it('is normalized to one spelling before the application is asked', function (string $header, ?string $normalized) {
-        expect(Host::normalize($header))->toBe($normalized);
-    })->with([
-        ['acme.shop.test', 'acme.shop.test'],
-        ['ACME.Shop.Test', 'acme.shop.test'],
-        ['acme.shop.test:8443', 'acme.shop.test'],
-        ['acme.shop.test.', 'acme.shop.test'],
-        ['  acme.shop.test  ', 'acme.shop.test'],
-        // Machines, not names, and things that are not hosts at all.
-        ['127.0.0.1', null],
-        ['[::1]:8080', null],
-        ['', null],
-        ['acme_shop.test', null],
-        ['acme.shop.test/evil', null],
-        ['-acme.test', null],
-        ['acme..test', null],
-    ]);
-
     it('names the tenant the application maps it to, and nothing for one it does not', function () {
         $hosts = new class implements TenantHosts {
             /** @var list<string> */

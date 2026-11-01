@@ -20,15 +20,21 @@ declare(strict_types=1);
 namespace Tinvar\Tests\Tenancy\HostRoutedTenancy;
 
 use Tinvar\Http\TrustedProxies;
+use Tinvar\Orm\PdoConnection;
+use Tinvar\Orm\RowLevelSecurity;
 use Tinvar\Render\RouteToken;
+use Tinvar\Tests\Orm\Fixtures\Databases;
 use Tinvar\Tests\Tenancy\Fixtures\Domains\App;
+use Tinvar\Tests\Tenancy\Fixtures\Domains\CachedNoteBodies;
 use Tinvar\Tests\Tenancy\Fixtures\Domains\Database;
+use Tinvar\Tests\Tenancy\Fixtures\Domains\Note;
 use Tinvar\Tests\Tenancy\Fixtures\Domains\SessionTenant;
 use Tinvar\Tests\Tenancy\Fixtures\Domains\SignIn;
 
 use const Tinvar\Tests\Tenancy\Fixtures\Domains\PROXY;
 use const Tinvar\Tests\Tenancy\Fixtures\Domains\PROXY_SECRET;
 
+require_once \Composer\InstalledVersions::getInstallPath('tinvar/database') . '/tests/Orm/Fixtures/databases.php';
 require_once __DIR__ . '/Fixtures/domains_app.php';
 
 function app(?Database $database = null, array $global = [SignIn::class]): App
@@ -279,4 +285,72 @@ describe('a worker answering one tenant after another', function () {
 
         expect($seen)->toBe(['acme-note-1', 'initech-note-1', 'globex-note-1', 'acme-note-1', 'initech-note-1']);
     });
+});
+
+describe('a worker\'s query cache', function () {
+    it('keeps each tenant\'s cached answer to itself, and lets a tenant invalidate only its own', function () {
+        CachedNoteBodies::$runs = [];
+        $database = new Database();
+        $app = app($database);
+        $read = static fn (string $host): mixed => App::json($app->post('/_query/notes.cached', $host, ['args' => new \stdClass()]))['value'] ?? null;
+
+        $acme = $read('acme.example.test');
+        $globex = $read('globex.example.test');
+        $read('acme.example.test');
+        $read('globex.example.test');
+        $cachedRuns = CachedNoteBodies::$runs;
+
+        $renamed = $app->post('/_action/RenameNotes.rename', 'globex.example.test', ['note' => $database->notes['globex'][0], 'body' => 'globex-renamed']);
+        $acmeAfter = $read('acme.example.test');
+        $globexAfter = $read('globex.example.test');
+
+        expect($acme)->toBe(['acme-note-1', 'acme-note-2'])
+            ->and($globex)->toBe(['globex-note-1', 'globex-note-2'])
+            ->and($cachedRuns)->toBe(['acme' => 1, 'globex' => 1])
+            ->and($renamed->status)->toBe(200, $renamed->body())
+            ->and($acmeAfter)->toBe(['acme-note-1', 'acme-note-2'])
+            ->and($globexAfter)->toBe(['globex-note-2', 'globex-renamed'])
+            ->and(CachedNoteBodies::$runs)->toBe(['acme' => 1, 'globex' => 2]);
+    });
+});
+
+describe('a worker on Postgres, with row-level security', function () {
+    it('tells each request its tenant, reads around the ORM only that tenant\'s rows, and leaves none told', function () {
+        Databases::inScratchSchema('pgsql', static function (\PDO $pdo, string $schema): void {
+            $pdo->exec('CREATE TABLE notes (id TEXT PRIMARY KEY, body TEXT NOT NULL, tenant_id TEXT NOT NULL)');
+            $connection = new PdoConnection($pdo, 'pgsql');
+            new Database($connection);
+            foreach (RowLevelSecurity::forModel(Note::class) as $sql) {
+                $pdo->exec($sql);
+            }
+            // A superuser bypasses every policy; the application connects as a role that does not.
+            $role = 'tinvar_rls_' . bin2hex(random_bytes(4));
+            $pdo->exec("CREATE ROLE {$role} NOLOGIN");
+            $pdo->exec("GRANT USAGE ON SCHEMA {$schema} TO {$role}");
+            $pdo->exec("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA {$schema} TO {$role}");
+            $pdo->exec("SET ROLE {$role}");
+
+            try {
+                $app = new App($connection);
+                $seen = [];
+                $told = [];
+                foreach (['acme.example.test', 'globex.example.test', 'initech.io', 'acme.example.test'] as $host) {
+                    $seen[] = page($app, '/raw', $host)['bodies'];
+                    $told[] = (string) $pdo->query("SELECT current_setting('app.tenant', true)")->fetchColumn();
+                }
+
+                expect($seen)->toBe([
+                    ['acme-note-1', 'acme-note-2'],
+                    ['globex-note-1', 'globex-note-2'],
+                    ['initech-note-1', 'initech-note-2'],
+                    ['acme-note-1', 'acme-note-2'],
+                ])->and($told)->toBe(['', '', '', '']);
+            } finally {
+                $pdo->exec('RESET ROLE');
+                $pdo->exec("SELECT set_config('app.tenant', '', false), set_config('app.across_tenants', 'off', false), set_config('app.subtree', '', false)");
+                $pdo->exec("DROP OWNED BY {$role}");
+                $pdo->exec("DROP ROLE {$role}");
+            }
+        });
+    })->group('pgsql')->skip(Databases::postgresMissing() !== null, Databases::postgresMissing() ?? '');
 });

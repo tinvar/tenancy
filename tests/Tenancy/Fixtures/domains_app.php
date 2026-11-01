@@ -288,6 +288,41 @@ final class NoteActions
     }
 }
 
+/** Each tenant's notes, cached under the `notes` tag, counting the times its body ran for each tenant. */
+#[Query(name: 'notes.cached', cache: '5m', tags: static function (): array {
+    return ['notes'];
+}), TenantFrom(Host::class), NoAuthorization(reason: 'a fixture listing its tenant\'s notes')]
+final class CachedNoteBodies
+{
+    /** @var array<string, int> tenant => body runs */
+    public static array $runs = [];
+
+    public function __construct(private readonly Orm $orm) {}
+
+    /** @return list<string> */
+    public function __invoke(): array
+    {
+        self::$runs[$this->orm->tenant()] = (self::$runs[$this->orm->tenant()] ?? 0) + 1;
+
+        return bodies($this->orm);
+    }
+}
+
+final readonly class RenameNotes
+{
+    public function __construct(private Orm $orm) {}
+
+    /** Renames a note, and invalidates the `notes` tag -- its own tenant's. */
+    #[Action, TenantFrom(Host::class), Authorize('update', 'note')]
+    public function rename(Note $note, string $body): ActionResult
+    {
+        $note->body = $body;
+        $this->orm->save($note);
+
+        return ActionResult::ok($note->body)->withTags('notes');
+    }
+}
+
 #[Query(name: 'notes.bodies'), TenantFrom(Host::class), NoAuthorization(reason: 'a fixture listing its tenant\'s notes')]
 final readonly class NoteBodies
 {
@@ -335,10 +370,10 @@ final class App
         $routes->registerAll([TenantNotes::class, TenantNote::class, TenantRaw::class, Home::class, PlatformNotes::class, AdminHome::class]);
 
         $actions = new ActionRegistry($container->resolver());
-        $actions->register(NoteActions::class);
+        $actions->registerAll([NoteActions::class, RenameNotes::class]);
 
         $queries = new QueryRegistry($container->resolver());
-        $queries->register(NoteBodies::class);
+        $queries->registerAll([NoteBodies::class, CachedNoteBodies::class]);
 
         $directory = $this->directory;
         $domains = new Domains(
@@ -358,7 +393,7 @@ final class App
             policies: new PolicyRegistry(),
             resolver: $container->resolver(),
             tenants: new Tenancy($container->resolver()),
-            allowedQueries: static fn (Request $r): array => ['notes.bodies'],
+            allowedQueries: static fn (Request $r): array => ['notes.bodies', 'notes.cached'],
             globalMiddleware: $global,
             gate: new AllowAllGate(),
             fragments: new FragmentSupport(

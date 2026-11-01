@@ -14,6 +14,7 @@ namespace Tinvar\Tests\Tenancy\Fakes;
 use Tinvar\Auth\Authenticatable;
 use Tinvar\Http\HttpException;
 use Tinvar\Http\Request;
+use Tinvar\Routing\HostMatch;
 use Tinvar\Tenancy\Fakes\SubtreeSourceFake;
 use Tinvar\Tenancy\Fakes\TenantSessionsFake;
 use Tinvar\Tenancy\Fakes\TenantSourceFake;
@@ -48,6 +49,18 @@ describe('a fake source', function () {
             ->and($source->tenantFor(at('globex.shop.test')))->toBeNull()
             ->and($source->tenantFor(at('127.0.0.1')))->toBeNull()
             ->and($source->asked())->toHaveCount(4);
+    });
+
+    // Where the application routes by host, Host reads the host the Kernel
+    // resolved -- a pinned proxy's X-Forwarded-Host among them -- and a
+    // fixed host of the platform's is no tenant's. The fake reads the same.
+    it('reads the resolved host where the application routes by host, as Host does', function () {
+        $source = TenantSourceFake::hosts(['acme.shop.test' => 'acme', 'www.shop.test' => 'www']);
+        $resolved = static fn (string $header, HostMatch $match): Request => at($header)->withAttribute(HostMatch::ATTRIBUTE, $match);
+
+        expect($source->tenantFor($resolved('proxy.internal', new HostMatch('{tenant}.shop.test', 'acme.shop.test', ['tenant' => 'acme']))))->toBe('acme')
+            ->and($source->tenantFor($resolved('acme.shop.test', new HostMatch(null, ''))))->toBeNull()
+            ->and($source->tenantFor($resolved('www.shop.test', new HostMatch('www.shop.test', 'www.shop.test'))))->toBeNull();
     });
 
     it('answers one tenant for all, or none', function () {

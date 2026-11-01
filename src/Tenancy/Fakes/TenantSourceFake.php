@@ -6,6 +6,7 @@ namespace Tinvar\Tenancy\Fakes;
 
 use Tinvar\Http\Request;
 use Tinvar\Http\HostName;
+use Tinvar\Routing\HostMatch;
 use Tinvar\Tenancy\TenantSource;
 
 /**
@@ -66,9 +67,18 @@ class TenantSourceFake implements TenantSource
         if (!\is_array($this->answers)) {
             return $this->answers;
         }
-        // Read as Host reads it: lowercase, without its port or a trailing
-        // dot, and nothing at all for what is not a host name.
-        $host = HostName::normalize($request->header('host') ?? '');
+        // Read as Host reads it: the host the application resolved, where it
+        // routes by host -- none resolved, or a fixed host of the
+        // platform's, being no tenant's -- and otherwise the Host header,
+        // lowercase, without its port or a trailing dot, and nothing at all
+        // for what is not a host name.
+        $resolved = HostMatch::of($request);
+        if ($resolved?->isFixed() === true) {
+            return null;
+        }
+        $host = $resolved !== null
+            ? ($resolved->host === '' ? null : $resolved->host)
+            : HostName::normalize($request->header('host') ?? '');
 
         return $host === null ? null : ($this->answers[$host] ?? null);
     }

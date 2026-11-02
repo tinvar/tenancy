@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 /**
- * An admin resource of a tenant's rows (ADR 0150), as acme on acme's host,
+ * An admin resource of a tenant's rows (ADR 0152), as acme on acme's host,
  * reaching for globex's every way its screens and actions can: the list,
  * its search, a record's page and its edit form, an update, a delete, a
  * bulk action naming one of globex's rows among acme's, and a form naming

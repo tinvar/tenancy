@@ -1,10 +1,11 @@
 {
   "name": "tinvar/tenancy",
-  "description": "Tinvar's tenancy, for the applications that opt into it: tenants read from a host or a signed URL, a tenant tree with its limits, the tenant switcher and tenants for commands.",
+  "description": "Tinvar's tenancy, for the applications that opt into it: tenants read from a host or a signed URL, a tenant tree with its limits, the tenant switcher, tenants for commands, and ready-made tenant self-service pages.",
   "type": "library",
   "license": "MIT",
   "require": {
     "php": ">=8.5",
+    "nesbot/carbon": "^3.15.1",
     "tinvar/database": "0.4.*",
     "tinvar/framework": "0.4.*",
     "tinvar/support": "0.4.*"
@@ -20,6 +21,15 @@
     "files": [
       "aliases.php"
     ]
+  },
+  "extra": {
+    "tinvar": {
+      "kit": {
+        "name": "tenant-pages",
+        "title": "Tenant pages: an organization switcher, custom domains, and settings with members and invites",
+        "class": "Tinvar\\Tenancy\\SelfService\\TenantPagesKit"
+      }
+    }
   },
   "config": { "sort-packages": true },
   "minimum-stability": "stable"

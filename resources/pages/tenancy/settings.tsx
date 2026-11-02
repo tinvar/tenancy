@@ -1,6 +1,12 @@
 import { Badge, Card, Heading, Stack, Table, TBody, Td, Text, Th, THead, Tr } from '@meridian/ui';
 import { Title } from '@tinvar/react/head';
-import { ActionButton, InviteForm, RenameForm, RoleForm, SlugForm } from '../../components/tenancy/TenancyForms';
+import {
+  ActionButton,
+  InviteForm,
+  RenameForm,
+  RoleForm,
+  SlugForm,
+} from '../../components/tenancy/TenancyForms';
 import type { TenantRole, TenantSettingsPageData } from '../../components/tenancy/types';
 
 /**
@@ -56,7 +62,12 @@ export default function Page({ data }: { data: TenantSettingsPageData }) {
                 {data.canManageMembers && (
                   <Td>
                     <Stack direction="row" gap="s2" align="center">
-                      <RoleForm action={data.actions.changeRole} member={member.userId} role={member.role} roles={data.roles} />
+                      <RoleForm
+                        action={data.actions.changeRole}
+                        member={member.userId}
+                        role={member.role}
+                        roles={data.roles}
+                      />
                       <ActionButton
                         action={data.actions.removeMember}
                         field="member"
@@ -75,7 +86,11 @@ export default function Page({ data }: { data: TenantSettingsPageData }) {
       </Card>
 
       {data.canManageMembers && (
-        <Card variant="flat" title="Invite someone" description="They get an email with a link, good for a week.">
+        <Card
+          variant="flat"
+          title="Invite someone"
+          description="They get an email with a link, good for a week."
+        >
           <InviteForm action={data.actions.invite} roles={data.roles} />
         </Card>
       )}

@@ -39,7 +39,11 @@ function TenancyForm({
 }: {
   action: string;
   label: string;
-  children: (slot: { errors: Record<string, string>; processing: boolean; old: (field: string) => string }) => ReactNode;
+  children: (slot: {
+    errors: Record<string, string>;
+    processing: boolean;
+    old: (field: string) => string;
+  }) => ReactNode;
 }) {
   const [failure, setFailure] = useState<string | null>(null);
 
@@ -64,7 +68,11 @@ function TenancyForm({
               It was open longer than a session lasts, so it has been loaded again. Submit it once more.
             </Banner>
           )}
-          {children({ errors: slot.errors, processing: slot.processing, old: (field) => slot.old(field, '') ?? '' })}
+          {children({
+            errors: slot.errors,
+            processing: slot.processing,
+            old: (field) => slot.old(field, '') ?? '',
+          })}
         </>
       )}
     </Form>
@@ -112,7 +120,14 @@ export function AddDomainForm({ action }: { action: string }) {
       {({ errors, processing, old }) => (
         <>
           <Field label="Domain" hint="A domain you own, such as shop.example.com." error={errors.host}>
-            <Input name="host" placeholder="shop.example.com" defaultValue={old('host')} autoComplete="off" spellCheck={false} required />
+            <Input
+              name="host"
+              placeholder="shop.example.com"
+              defaultValue={old('host')}
+              autoComplete="off"
+              spellCheck={false}
+              required
+            />
           </Field>
           <Button type="submit" variant="primary" disabled={processing}>
             {processing ? 'Adding…' : 'Add domain'}
@@ -156,8 +171,19 @@ export function SlugForm({ action, slug }: { action: string; slug: string }) {
     <TenancyForm action={action} label="Change the address">
       {({ errors, processing }) => (
         <>
-          <Field label="Address" hint="Your organization's subdomain. Changing it moves its address: old links stop working." error={errors.slug}>
-            <Input name="slug" defaultValue={slug} maxLength={63} autoComplete="off" spellCheck={false} required />
+          <Field
+            label="Address"
+            hint="Your organization's subdomain. Changing it moves its address: old links stop working."
+            error={errors.slug}
+          >
+            <Input
+              name="slug"
+              defaultValue={slug}
+              maxLength={63}
+              autoComplete="off"
+              spellCheck={false}
+              required
+            />
           </Field>
           <Button type="submit" disabled={processing}>
             {processing ? 'Moving…' : 'Change address'}
@@ -173,8 +199,17 @@ export function InviteForm({ action, roles }: { action: string; roles: TenantRol
     <TenancyForm action={action} label="Invite someone">
       {({ errors, processing, old }) => (
         <>
-          <Field label="Email" error={errors.email ? 'Enter a full email address, like name@example.com.' : undefined}>
-            <Input type="email" name="email" placeholder="name@example.com" defaultValue={old('email')} required />
+          <Field
+            label="Email"
+            error={errors.email ? 'Enter a full email address, like name@example.com.' : undefined}
+          >
+            <Input
+              type="email"
+              name="email"
+              placeholder="name@example.com"
+              defaultValue={old('email')}
+              required
+            />
           </Field>
           <Field label="Role" error={errors.role}>
             <Select name="role" defaultValue={old('role') || roles[roles.length - 1]?.value}>
@@ -194,13 +229,28 @@ export function InviteForm({ action, roles }: { action: string; roles: TenantRol
   );
 }
 
-export function RoleForm({ action, member, role, roles }: { action: string; member: string; role: string; roles: TenantRole[] }) {
+export function RoleForm({
+  action,
+  member,
+  role,
+  roles,
+}: {
+  action: string;
+  member: string;
+  role: string;
+  roles: TenantRole[];
+}) {
   return (
     <TenancyForm action={action} label="Change role">
       {({ errors, processing }) => (
         <>
           <input type="hidden" name="member" value={member} />
-          <Select name="role" defaultValue={role} aria-label="Role" invalid={Boolean(errors.role || errors.member)}>
+          <Select
+            name="role"
+            defaultValue={role}
+            aria-label="Role"
+            invalid={Boolean(errors.role || errors.member)}
+          >
             {roles.map((r) => (
               <option key={r.value} value={r.value}>
                 {r.label}

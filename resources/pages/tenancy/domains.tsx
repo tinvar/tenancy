@@ -30,7 +30,8 @@ export default function Page({ data }: { data: TenantDomainsPageData }) {
           Custom domains
         </Heading>
         <Text tone="secondary">
-          Serve your organization on a domain of your own. Add it, create the two records shown, then check it.
+          Serve your organization on a domain of your own. Add it, create the two records shown, then check
+          it.
           {` Up to ${data.limit} domains.`}
         </Text>
       </Stack>
@@ -70,7 +71,13 @@ function DomainCard({ domain, data }: { domain: TenantDomain; data: TenantDomain
         actions={
           data.canManage ? (
             <Stack direction="row" gap="s2">
-              <ActionButton action={data.checkAction} field="domain" value={domain.id} label="Check now" busyLabel="Checking…" />
+              <ActionButton
+                action={data.checkAction}
+                field="domain"
+                value={domain.id}
+                label="Check now"
+                busyLabel="Checking…"
+              />
               <ActionButton
                 action={data.removeAction}
                 field="domain"
@@ -100,7 +107,9 @@ function DomainCard({ domain, data }: { domain: TenantDomain; data: TenantDomain
                     <Td mono>{record.type}</Td>
                     <Td mono>{record.name}</Td>
                     <Td mono>{record.value}</Td>
-                    <Td muted>{record.purpose === 'ownership' ? 'Proves it is yours' : 'Sends visitors here'}</Td>
+                    <Td muted>
+                      {record.purpose === 'ownership' ? 'Proves it is yours' : 'Sends visitors here'}
+                    </Td>
                   </Tr>
                 ))}
               </TBody>

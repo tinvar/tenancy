@@ -452,6 +452,7 @@ final class App
     public readonly Signer $routeSigner;
     public readonly Directory $directory;
     public readonly Sessions $sessions;
+    public readonly Container $container;
 
     /** @var list<array{route: string, tenant: string}> */
     public array $rerendered = [];
@@ -465,17 +466,35 @@ final class App
     /**
      * @param list<class-string> $routes pages and layouts beside the fixture's own
      * @param list<class-string> $actions action holders beside the fixture's own
+     * @param array<class-string, object> $instances put in the container beside the fixture's own
+     * @param list<class-string> $queries queries beside the fixture's own
+     * @param list<string> $redirectable host patterns an action may send a browser to (Domains)
      */
-    public function __construct(Connection $connection, array $global = [SignIn::class], ?string $proxySecret = PROXY_SECRET, array $routes = [], array $actions = [])
-    {
-        $this->orm = new Orm($connection, new IdentityMap('domains-test'), Tenancy::tree());
-        $this->auth = new AuthContext();
+    public function __construct(
+        Connection $connection,
+        array $global = [SignIn::class],
+        ?string $proxySecret = PROXY_SECRET,
+        array $routes = [],
+        array $actions = [],
+        ?\Tinvar\Auth\Gate $gate = null,
+        ?PolicyRegistry $policies = null,
+        array $instances = [],
+        ?\Tinvar\Auth\PanelRegistry $panelRegistry = null,
+        ?Memberships $memberships = null,
+        array $queries = [],
+        array $redirectable = [],
+        ?Orm $orm = null,
+        ?AuthContext $auth = null,
+        ?Container $container = null,
+    ) {
+        $this->orm = $orm ?? new Orm($connection, new IdentityMap('domains-test'), Tenancy::tree());
+        $this->auth = $auth ?? new AuthContext();
         $this->routeSigner = new Signer(KEY, RouteToken::PURPOSE);
         $this->directory = new Directory();
         $panels = new PanelContext();
 
         $this->sessions = new Sessions();
-        $container = new Container()
+        $this->container = $container = ($container ?? new Container())
             ->instance(TenantHosts::class, $this->directory)
             ->instance(TenantSwitcher::class, new TenantSwitcher(
                 $this->orm,
@@ -485,6 +504,9 @@ final class App
                 static fn (Request $r): string => SESSION,
                 realms(),
             ));
+        foreach ($instances as $class => $instance) {
+            $container->instance($class, $instance);
+        }
 
         $extraRoutes = $routes;
         $routes = new RouteRegistry();
@@ -494,8 +516,9 @@ final class App
         $actions = new ActionRegistry($container->resolver());
         $actions->registerAll([NoteActions::class, RenameNotes::class, SwitchTenant::class, ...$extraActions]);
 
+        $extraQueries = $queries;
         $queries = new QueryRegistry($container->resolver());
-        $queries->registerAll([NoteBodies::class, CachedNoteBodies::class]);
+        $queries->registerAll([NoteBodies::class, CachedNoteBodies::class, ...$extraQueries]);
 
         $directory = $this->directory;
         $domains = new Domains(
@@ -504,6 +527,7 @@ final class App
             proxies: TrustedProxies::of(['10.0.0.0/8'], [], $proxySecret),
             custom: static fn (string $host): ?array => $directory->customDomain($host),
             customAs: '{tenant}.{root}',
+            redirectable: $redirectable,
         );
 
         $this->kernel = new Kernel(
@@ -512,12 +536,14 @@ final class App
             queries: $queries,
             actions: $actions,
             auth: $this->auth,
-            policies: new PolicyRegistry(),
+            policies: $policies ?? new PolicyRegistry(),
             resolver: $container->resolver(),
             tenants: new Tenancy($container->resolver()),
-            allowedQueries: static fn (Request $r): array => ['notes.bodies', 'notes.cached'],
+            allowedQueries: $extraQueries === [] ? static fn (Request $r): array => ['notes.bodies', 'notes.cached'] : static fn (Request $r): array => $queries->names(),
             globalMiddleware: $global,
-            gate: new AllowAllGate(),
+            gate: $gate ?? new AllowAllGate(),
+            panelRegistry: $panelRegistry,
+            memberships: $memberships,
             fragments: new FragmentSupport(
                 signer: new Signer(KEY, FragmentToken::PURPOSE),
                 builds: new BuildRegistry('build-1'),
@@ -549,8 +575,12 @@ final class App
      */
     public function get(string $path, string $host, array $headers = [], ?string $peer = null): Response
     {
+        $rawQuery = parse_url($path, PHP_URL_QUERY);
+        parse_str(\is_string($rawQuery) ? $rawQuery : '', $query);
+        $path = (string) parse_url($path, PHP_URL_PATH);
+
         return $this->kernel->handle(
-            new Request('GET', $path, ['host' => $host, ...$headers], remoteAddress: $peer),
+            new Request('GET', $path, ['host' => $host, ...$headers], array_filter($query, \is_string(...)), rawQuery: \is_string($rawQuery) ? $rawQuery : null, remoteAddress: $peer),
             static fn (LoadedRoute $loaded, Request $passed): Response => Response::make(200, json_encode([
                 'page' => $loaded->page === null ? [] : get_object_vars($loaded->page),
             ], JSON_THROW_ON_ERROR)),

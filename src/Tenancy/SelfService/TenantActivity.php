@@ -7,7 +7,7 @@ namespace Tinvar\Tenancy\SelfService;
 use Tinvar\Auth\Authenticatable;
 
 /**
- * Where the tenant self-service pages record what they changed (ADR 0159):
+ * Where the tenant self-service pages record what they changed (ADR 0161):
  * the seam an activity log plugs into.
  *
  * Told of every change once it is made, inside the transaction that made

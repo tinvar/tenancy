@@ -7,7 +7,7 @@ namespace Tinvar\Tenancy\SelfService;
 use Tinvar\Auth\Authenticatable;
 
 /**
- * Sending an invite from the settings page (ADR 0159): made with the
+ * Sending an invite from the settings page (ADR 0161): made with the
  * framework's Invitations and emailed, off the request.
  *
  * QueuedTenantInvites dispatches SendTenantInvite, which makes the link on

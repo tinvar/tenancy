@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 /**
- * The tenant self-service pages' shipped views (ADR 0159) in a real
+ * The tenant self-service pages' shipped views (ADR 0161) in a real
  * browser: the fixture application (app/Fixture.php) behind php -S, the
  * Node renderer over its socket with the fixture's build of the package's
  * own views, Chromium driving them (packages/tenancy/e2e/self-service.mjs).

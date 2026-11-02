@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 /**
- * The tenant pages kit (ADR 0159), as `kit:install tinvar/tenancy` and
+ * The tenant pages kit (ADR 0161), as `kit:install tinvar/tenancy` and
  * `tinvar new --kit=tinvar/tenancy` run it: the application's page classes,
  * policy, views and migration written once, the views registered in its
  * route table, and nothing written over.

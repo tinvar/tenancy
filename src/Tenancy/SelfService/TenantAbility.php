@@ -6,7 +6,7 @@ namespace Tinvar\Tenancy\SelfService;
 
 /**
  * What the tenant self-service pages ask the application's policy for
- * TenantAdministration (ADR 0159): one ability per thing a page shows or
+ * TenantAdministration (ADR 0161): one ability per thing a page shows or
  * changes, each a public method of that policy.
  *
  * The pages carry them as #[Authorize] on their final loaders and actions,

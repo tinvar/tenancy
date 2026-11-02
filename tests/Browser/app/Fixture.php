@@ -81,7 +81,7 @@ use Tinvar\Tenancy\TenantHosts;
 
 /**
  * A small multi-tenant application serving the tenant self-service pages
- * (ADR 0159) through the real renderer, for the browser test
+ * (ADR 0161) through the real renderer, for the browser test
  * (SelfServiceBrowserTest): tenants on `{slug}.localhost:PORT`, the
  * platform on `localhost:PORT`, everything kept in a SQLite file, built
  * afresh for each request -- php -S runs every request in a process of its

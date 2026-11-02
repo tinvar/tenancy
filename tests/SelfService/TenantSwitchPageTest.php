@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 /**
- * The ready-made tenant switcher (ADR 0159), through the real Kernel of a
+ * The ready-made tenant switcher (ADR 0161), through the real Kernel of a
  * host-routed application: m-1 belongs to acme and globex, on their
  * subdomains, and to initech, on its custom domain; umbrella is someone
  * else's. On a subdomain, the others are a handoff away; on the custom

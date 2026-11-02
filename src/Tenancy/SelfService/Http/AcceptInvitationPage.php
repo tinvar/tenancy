@@ -27,7 +27,7 @@ use Tinvar\Tenancy\SelfService\TenantRoles;
 use Tinvar\Validation\ValidationException;
 
 /**
- * The page an invite's emailed link lands on, ready-made (ADR 0159): what
+ * The page an invite's emailed link lands on, ready-made (ADR 0161): what
  * the invite is, and the action that accepts it.
  *
  *     #[Page('/invite', view: 'tenancy/invitation', name: 'tenancy.invitation'),

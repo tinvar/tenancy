@@ -1,4 +1,4 @@
-// Drives the tenant self-service pages' shipped views (ADR 0159) in
+// Drives the tenant self-service pages' shipped views (ADR 0161) in
 // Chromium, against the browser fixture application, and prints what
 // happened as one JSON object.
 //

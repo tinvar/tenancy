@@ -6,7 +6,7 @@ namespace Tinvar\Tenancy\SelfService;
 
 /**
  * Where a tenant's custom domain stands, as its domains page shows it
- * (ADR 0159). Only Verified and Failing are served: they are the active
+ * (ADR 0161). Only Verified and Failing are served: they are the active
  * domains the daily re-verification checks (CustomDomains), the realm
  * lookup answers for, and Caddy is let obtain a certificate for.
  */

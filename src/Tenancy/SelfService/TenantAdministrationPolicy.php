@@ -11,7 +11,7 @@ use Tinvar\Auth\PanelContext;
 use Tinvar\Orm\Orm;
 
 /**
- * Who may do what on the tenant self-service pages, by default (ADR 0159):
+ * Who may do what on the tenant self-service pages, by default (ADR 0161):
  * the policy for TenantAdministration that an application extends and
  * registers -- as is, or with any ability answered its own way.
  *

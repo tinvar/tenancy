@@ -13,7 +13,7 @@ use Tinvar\Validation\ValidationException;
 
 /**
  * A tenant's settings, as its settings page reads and changes them (ADR
- * 0159): its name and slug, its members and their roles, and its invites
+ * 0161): its name and slug, its members and their roles, and its invites
  * (the framework's Invitations).
  *
  * Every change is made for the tenant the request runs as, and recorded

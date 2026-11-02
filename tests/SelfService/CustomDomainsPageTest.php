@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 /**
- * The ready-made custom domains page (ADR 0159), through the real Kernel:
+ * The ready-made custom domains page (ADR 0161), through the real Kernel:
  * acme's owner adds a domain, sees the records to create, and watches it
  * go from pending to verified once its TXT record and CNAME are there; the
  * daily check and Caddy's ask take it from there. And every way one tenant

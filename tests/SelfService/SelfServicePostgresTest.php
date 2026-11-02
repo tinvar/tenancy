@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 /**
- * The self-service pages' stores on Postgres (ADR 0159), where their SQL --
+ * The self-service pages' stores on Postgres (ADR 0161), where their SQL --
  * a recursive tenant tree, a unique index that is all that keeps two
  * tenants off one host, a savepoint around a refused activation -- must
  * hold as it does on SQLite, and every read of another tenant's rows still

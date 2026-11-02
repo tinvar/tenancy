@@ -19,7 +19,7 @@ use Tinvar\Tenancy\SelfService\TenantSwitchboard;
 use Tinvar\Tenancy\SelfService\TenantSwitchVia;
 
 /**
- * The tenant switcher, ready-made (ADR 0159): a page listing the tenants
+ * The tenant switcher, ready-made (ADR 0161): a page listing the tenants
  * the signed-in user belongs to, and the action that switches to one.
  *
  * The application declares it, and discovery registers it:

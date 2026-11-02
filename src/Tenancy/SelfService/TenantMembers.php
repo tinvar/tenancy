@@ -6,7 +6,7 @@ namespace Tinvar\Tenancy\SelfService;
 
 /**
  * A tenant's members of a panel, and their roles, as the settings page
- * reads and changes them (ADR 0159). DatabaseTenantMembers keeps them in a
+ * reads and changes them (ADR 0161). DatabaseTenantMembers keeps them in a
  * table of its own -- and answers the framework's Memberships from it; an
  * application with its own memberships implements this over them.
  *

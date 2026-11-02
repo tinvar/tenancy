@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Tinvar\Tenancy\SelfService;
 
 /**
- * Which slugs a tenant may take (ADR 0159): a slug is the label of its
+ * Which slugs a tenant may take (ADR 0161): a slug is the label of its
  * subdomain, `{slug}.example.com`, so it is held to what a label may be and
  * kept off every name the platform uses for itself.
  *

@@ -31,7 +31,7 @@ use Tinvar\Tenancy\TenantSwitching;
 
 /**
  * The tenant self-service pages' services, built from what only the
- * application knows and registered in its container (ADR 0159), as
+ * application knows and registered in its container (ADR 0161), as
  * AccountsKit is for accounts:
  *
  *     $selfService = new TenantSelfService(

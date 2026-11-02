@@ -21,7 +21,7 @@ use Tinvar\Tenancy\SelfService\TenantDomain;
 use Tinvar\Tenancy\SelfService\TenantDomainClaims;
 
 /**
- * A tenant's custom domains, ready-made (ADR 0159): the page where a tenant
+ * A tenant's custom domains, ready-made (ADR 0161): the page where a tenant
  * admin adds one, sees the DNS records to create for it and its status --
  * pending, verified, failing or deactivated -- checks it, and removes it.
  *

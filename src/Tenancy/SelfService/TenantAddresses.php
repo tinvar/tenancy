@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Tinvar\Tenancy\SelfService;
 
 /**
- * Where each tenant is served, for the tenant switcher (ADR 0159): the
+ * Where each tenant is served, for the tenant switcher (ADR 0161): the
  * origin of a tenant's own host -- its subdomain, or its verified custom
  * domain -- or null for a tenant with none, which a session switches into
  * on the host it is on.

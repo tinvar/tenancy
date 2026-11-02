@@ -121,6 +121,12 @@ beforeAll(function (): void {
     if (!is_file("{$root}/node_modules/playwright/package.json")) {
         test()->markTestSkipped('Playwright is not installed (npm ci at the repository root).');
     }
+    // The renderer's own packages, as it resolves them: a run that installed
+    // the browser's without them would start a renderer that cannot load.
+    $renderer = trim(runFor(['node', '--input-type=module', '-e', "import('@msgpack/msgpack').then(() => process.stdout.write('yes'), () => process.stdout.write('no'))"], "{$root}/packages/renderer", 30));
+    if ($renderer !== 'yes') {
+        test()->markTestSkipped('The renderer\'s packages are not installed (npm ci at the repository root).');
+    }
     $chromium = trim(runFor(['node', '-e', "const { chromium } = require('playwright'); process.stdout.write(require('fs').existsSync(chromium.executablePath()) ? 'yes' : 'no')"], $root, 30));
     if ($chromium !== 'yes') {
         test()->markTestSkipped("Playwright's Chromium is not installed (npx playwright install chromium).");

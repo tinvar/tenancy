@@ -4,7 +4,7 @@ import { AcceptInviteForm } from '../../components/tenancy/TenancyForms';
 import type { InvitationPageData } from '../../components/tenancy/types';
 
 /**
- * The page an invite's emailed link lands on (ADR 0155): whom it invites, to
+ * The page an invite's emailed link lands on (ADR 0159): whom it invites, to
  * what, and -- signed in as that address -- the button that accepts it.
  */
 export default function Page({ data }: { data: InvitationPageData }) {

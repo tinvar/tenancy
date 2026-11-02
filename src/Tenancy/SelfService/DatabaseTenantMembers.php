@@ -18,7 +18,7 @@ use Tinvar\Orm\TimestampStorage;
 
 /**
  * Who belongs to which tenant's panel, and in what role, in a table of
- * tinvar/tenancy's own (ADR 0155): the settings page's TenantMembers, and
+ * tinvar/tenancy's own (ADR 0159): the settings page's TenantMembers, and
  * the framework's Memberships and TenantMemberships from the same rows --
  * so the member the page lists is the member every panel lets in, with the
  * permissions their role grants (TenantRoles).

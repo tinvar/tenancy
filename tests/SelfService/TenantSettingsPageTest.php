@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 /**
- * The ready-made settings and invitation pages (ADR 0155), through the real
+ * The ready-made settings and invitation pages (ADR 0159), through the real
  * Kernel: acme's owner Ann renames it, moves its slug, invites, re-roles
  * and removes members; Bob, an admin, may manage members but never climb
  * above his role; Cy, a member, may change nothing. Nothing on acme's host

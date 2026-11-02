@@ -16,7 +16,7 @@ use Tinvar\Orm\Orm;
 
 /**
  * An invite from a tenant's settings page, made and sent on the worker
- * (ADR 0155, after the shop's staff invites, ADR 0076): the link is made
+ * (ADR 0159, after the shop's staff invites, ADR 0076): the link is made
  * here so it is never a row in the jobs table, and mailed at once.
  *
  * It runs as the tenant that dispatched it, as every job does, and does

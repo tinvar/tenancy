@@ -12,7 +12,7 @@ use Tinvar\Generators\RouteTable;
 
 /**
  * The tenant self-service pages, written into an application once (ADR
- * 0155, ADR 0157): `bin/tinvar kit:install tinvar/tenancy`, or `tinvar new
+ * 0159, ADR 0157): `bin/tinvar kit:install tinvar/tenancy`, or `tinvar new
  * --tenancy=subdomain --kit=tinvar/tenancy`, which runs it.
  *
  * It writes the application's own classes -- one per page, each a few lines
@@ -98,25 +98,25 @@ final class TenantPagesKit implements AppKit
                 'Organizations',
                 'TenantSwitchPage',
                 "#[Page('/organizations', view: 'tenancy/switch', name: 'tenancy.switch'), Domain('{tenant}.{root}'), TenantFrom(Host::class), Panel('customer')]",
-                'The organizations the signed-in user belongs to, and the switch between them (ADR 0155).',
+                'The organizations the signed-in user belongs to, and the switch between them (ADR 0159).',
             ),
             'Http/Pages/Tenancy/OrganizationDomains.php' => $page(
                 'OrganizationDomains',
                 'CustomDomainsPage',
                 "#[Page('/settings/domains', view: 'tenancy/domains', name: 'tenancy.domains'), Domain('{tenant}.{root}'), TenantFrom(Host::class), Panel('customer')]",
-                'The organization\'s custom domains: added, proved, checked and removed by its admins (ADR 0155).',
+                'The organization\'s custom domains: added, proved, checked and removed by its admins (ADR 0159).',
             ),
             'Http/Pages/Tenancy/OrganizationSettings.php' => $page(
                 'OrganizationSettings',
                 'TenantSettingsPage',
                 "#[Page('/settings', view: 'tenancy/settings', name: 'tenancy.settings'), Domain('{tenant}.{root}'), TenantFrom(Host::class), Panel('customer')]",
-                'The organization\'s name, address, members, roles and invites (ADR 0155).',
+                'The organization\'s name, address, members, roles and invites (ADR 0159).',
             ),
             'Http/Pages/Tenancy/OrganizationInvitation.php' => $page(
                 'OrganizationInvitation',
                 'AcceptInvitationPage',
                 "#[Page('/invite', view: 'tenancy/invitation', name: 'tenancy.invitation'), Domain('{tenant}.{root}'), TenantFrom(Host::class)]",
-                'Where an invite\'s emailed link lands: in no panel, since whoever opens it is no member yet (ADR 0155).',
+                'Where an invite\'s emailed link lands: in no panel, since whoever opens it is no member yet (ADR 0159).',
             ),
             'Policies/Tenancy/TenantAdministrationRules.php' => <<<PHP
                 <?php
@@ -157,7 +157,7 @@ final class TenantPagesKit implements AppKit
             use Tinvar\\Tenancy\\SelfService\\TenantDomains;
 
             /**
-             * The tenant self-service pages' tables (ADR 0155), written by
+             * The tenant self-service pages' tables (ADR 0159), written by
              * `kit:install tinvar/tenancy`: the members and their roles, and the
              * custom domains. The tenants table `tinvar new` made gains the name
              * and parent the settings page and the tenant tree read; an app

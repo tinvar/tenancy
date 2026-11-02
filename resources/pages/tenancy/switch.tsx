@@ -6,7 +6,7 @@ import { ActionButton } from '../../components/tenancy/TenancyForms';
 import type { TenantSwitchPageData } from '../../components/tenancy/types';
 
 /**
- * The tenant switcher (ADR 0155): every organization the signed-in user
+ * The tenant switcher (ADR 0159): every organization the signed-in user
  * belongs to, the current one first. One on a host of its own is reached
  * through the handoff, which signs them in there; one on this host by a new
  * session.

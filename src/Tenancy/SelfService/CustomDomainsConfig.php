@@ -14,7 +14,7 @@ use Tinvar\Support\DevMode;
 
 /**
  * Where tenants' custom domains must point, and how they are kept (ADR
- * 0155), read from `TINVAR_CUSTOM_DOMAIN_*` as an application's variables
+ * 0159), read from `TINVAR_CUSTOM_DOMAIN_*` as an application's variables
  * are (ADR 0085):
  *
  * - `TARGETS`: the host names a domain may be a CNAME of, such as

@@ -6,7 +6,7 @@ namespace Tinvar\Tenancy\SelfService;
 
 /**
  * The application's tenants, as the self-service pages read and change
- * them (ADR 0155): a name, and a slug -- the label of the tenant's
+ * them (ADR 0159): a name, and a slug -- the label of the tenant's
  * subdomain. DatabaseTenants keeps them in a table of its own; an
  * application with its own tenants table implements this over it.
  *

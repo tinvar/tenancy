@@ -15,7 +15,7 @@ use Tinvar\Validation\ValidationException;
 
 /**
  * A tenant's custom domains, as its admins add, check and remove them on
- * the domains page (ADR 0155), over TenantDomains and the framework's
+ * the domains page (ADR 0159), over TenantDomains and the framework's
  * DomainVerifier and CustomDomainVerification.
  *
  * Adding a domain claims it, and serves nothing: it is pending, and the

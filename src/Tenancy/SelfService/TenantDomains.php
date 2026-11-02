@@ -16,7 +16,7 @@ use Tinvar\Support\Uuid;
 
 /**
  * The tenants' custom domains, in a table of tinvar/tenancy's own (ADR
- * 0155): what the domains page adds, checks and removes, and the records
+ * 0159): what the domains page adds, checks and removes, and the records
  * the framework's re-verification reads and writes (CustomDomains) -- the
  * daily VerifyCustomDomains, and Caddy's TlsAskEndpoint.
  *

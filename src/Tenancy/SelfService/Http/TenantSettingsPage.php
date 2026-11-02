@@ -36,7 +36,7 @@ use Tinvar\Tenancy\SelfService\TenantRole;
 use Tinvar\Tenancy\SelfService\TenantSettings;
 
 /**
- * A tenant's settings, ready-made (ADR 0155): its name, its slug, its
+ * A tenant's settings, ready-made (ADR 0159): its name, its slug, its
  * members and their roles, and its invites.
  *
  *     #[Page('/settings', view: 'tenancy/settings', name: 'tenancy.settings'),

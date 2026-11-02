@@ -1,5 +1,5 @@
 /**
- * The data each tenant self-service page sends its view (ADR 0155), as
+ * The data each tenant self-service page sends its view (ADR 0159), as
  * tinvar/tenancy's Data classes declare it. Codegen types an application's
  * own pages as `PageProps<'tenancy/domains'>`; these say the same for the
  * views the kit ships, so they build before codegen has run.

@@ -7,7 +7,7 @@ namespace Tinvar\Tenancy\SelfService;
 use Tinvar\Identity\CanonicalOrigins;
 
 /**
- * The origin a tenant's emailed links are built on (ADR 0155): its own
+ * The origin a tenant's emailed links are built on (ADR 0159): its own
  * host, where the page an invite lands on places it -- TenantAddresses, its
  * subdomain or its verified custom domain -- or else its canonical origin
  * (CanonicalOrigins). Never a request's Host header: an invite is made on a

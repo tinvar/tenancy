@@ -14,7 +14,7 @@ use Tinvar\Tenancy\TenantDirectory;
 use Tinvar\Tenancy\TenantTree;
 
 /**
- * The tenants, in a table of tinvar/tenancy's own (ADR 0155): an id, a
+ * The tenants, in a table of tinvar/tenancy's own (ADR 0159): an id, a
  * name, a slug -- its subdomain's label -- and a parent. A ready-made
  * TenantProfiles for the settings page, and the TenantDirectory and
  * TenantTree the rest of tenancy reads, from the one table, so they cannot

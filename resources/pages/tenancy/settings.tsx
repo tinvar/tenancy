@@ -4,7 +4,7 @@ import { ActionButton, InviteForm, RenameForm, RoleForm, SlugForm } from '../../
 import type { TenantRole, TenantSettingsPageData } from '../../components/tenancy/types';
 
 /**
- * The organization's settings (ADR 0155): its name and address, its members
+ * The organization's settings (ADR 0159): its name and address, its members
  * and their roles, and the invites still open. Each form is drawn for a
  * member whose role may use it; the action behind it asks again.
  */

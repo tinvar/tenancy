@@ -79,7 +79,7 @@ use const Tinvar\Tests\Tenancy\Fixtures\Domains\SESSION;
 require_once \dirname(__DIR__, 2) . '/Tenancy/Fixtures/domains_app.php';
 
 /**
- * The tenant self-service pages (ADR 0155), declared as an application
+ * The tenant self-service pages (ADR 0159), declared as an application
  * declares them, in the multi-tenant application of domains_app.php:
  * tenants on `{tenant}.example.test`, initech on its custom domain
  * `initech.io`, the platform on the apex.

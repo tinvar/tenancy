@@ -15,7 +15,7 @@ use Tinvar\Tenancy\SelfService\TenantAbility;
 use Tinvar\Tenancy\SelfService\TenantAdministration;
 
 /**
- * What the tenant administration pages share (ADR 0155): the tenant they
+ * What the tenant administration pages share (ADR 0159): the tenant they
  * run as, which links and forms to draw, and how an action answers.
  *
  * The tenant is the one the request runs as -- read from its host or its

@@ -9,7 +9,7 @@ use Tinvar\Identity\DnsTextResolver;
 
 /**
  * Whether a tenant proved a custom domain is theirs: a TXT record at
- * `_tinvar-challenge.<host>` carrying their claim's token (ADR 0155).
+ * `_tinvar-challenge.<host>` carrying their claim's token (ADR 0159).
  *
  * Where a domain points is no proof of who owns it. A domain a tenant gave
  * up -- removed, or left when their account closed -- usually goes on

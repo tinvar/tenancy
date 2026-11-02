@@ -14,7 +14,7 @@ const STATUS: Record<TenantDomainStatus, { label: string; tone: 'neutral' | 'goo
 };
 
 /**
- * The organization's custom domains (ADR 0155): each one's status, what its
+ * The organization's custom domains (ADR 0159): each one's status, what its
  * last check found, and the DNS records to create for it. While one is
  * pending or failing, the page reloads itself to show what the checks find.
  */

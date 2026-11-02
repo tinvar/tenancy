@@ -15,7 +15,7 @@ use Tinvar\Tenancy\SelfService\TenantDomain;
 use Tinvar\Tenancy\SelfService\TenantDomainClaims;
 
 /**
- * The tenant's custom domains as they stand now, ready-made (ADR 0155): the
+ * The tenant's custom domains as they stand now, ready-made (ADR 0159): the
  * query the domains page's view polls while a domain is pending or failing,
  * so a status changed by the daily check, by Caddy's ask or by another
  * admin shows without a reload. It reads; it checks nothing itself.

@@ -17,7 +17,7 @@ use Tinvar\Orm\Orm;
 use Tinvar\Tenancy\TenantSwitching;
 
 /**
- * The tenant switcher page's service (ADR 0155): every tenant the signed-in
+ * The tenant switcher page's service (ADR 0159): every tenant the signed-in
  * user may go to from here, and the switch to one -- by a new session on
  * this host, or by the cross-host handoff to a tenant's own.
  *

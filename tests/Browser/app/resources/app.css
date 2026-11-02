@@ -1,0 +1,6 @@
+/* The fixture's one stylesheet, which the StyleX plugin appends what it compiles to. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}

@@ -253,6 +253,34 @@ describe('a route on a {tenant} host', function () {
             ->and($fine)->toBe([]);
     });
 
+    it('is reported by tinvar check for an action, a query and a channel, as the Kernel refuses them', function (string $kind, string $class, string $where) {
+        $domains = new \Tinvar\Routing\Domains(['root' => ROOT]);
+        $leaky = \Tinvar\Console\AppConsole::hostViolations([], [], [], $domains, ...[$kind => [$class]]);
+
+        expect($leaky)->toHaveCount(1)
+            ->and($leaky[0]->rule)->toBe(\Tinvar\Console\AppConsole::TENANT_HOST_READS_HOST)
+            ->and($leaky[0]->where)->toContain($where)
+            ->and($leaky[0]->message)->toContain('reads its tenant from nowhere');
+    })->with([
+        'an action' => ['actions', \Tinvar\Tests\Tenancy\Fixtures\Domains\LeakyActions::class, 'LeakyActions::leak()'],
+        'a query' => ['queries', \Tinvar\Tests\Tenancy\Fixtures\Domains\LeakyNoteBodies::class, 'LeakyNoteBodies'],
+        'a channel' => ['channels', \Tinvar\Tests\Tenancy\Fixtures\Domains\LeakyNoteFeed::class, 'LeakyNoteFeed'],
+    ]);
+
+    it('is reported by tinvar check for an action in a panel living on a {tenant} host, as the Kernel refuses it', function () {
+        $panels = new \Tinvar\Auth\PanelRegistry(new \Tinvar\Auth\PanelDefinition('customer', domain: '{tenant}.{root}'));
+        $domains = new \Tinvar\Routing\Domains(['root' => ROOT]);
+
+        $leaky = \Tinvar\Console\AppConsole::hostViolations([], [], [], $domains, actions: [\Tinvar\Tests\Tenancy\Fixtures\Domains\PanelLeakyActions::class], panels: $panels);
+        $fine = \Tinvar\Console\AppConsole::hostViolations([], [], [], $domains, actions: [\Tinvar\Tests\Tenancy\Fixtures\Domains\NoteActions::class, \Tinvar\Tests\Tenancy\Fixtures\Domains\PanelLeakyActions::class]);
+
+        expect($leaky)->toHaveCount(1)
+            ->and($leaky[0]->where)->toContain('PanelLeakyActions::leak()')
+            ->and($leaky[0]->message)->toContain('is on {tenant}.{root}')
+            // With no panel living there, neither is on a tenant's host.
+            ->and($fine)->toBe([]);
+    });
+
     it('is built when it reads its tenant from the host', function () {
         expect(app()->kernel)->toBeInstanceOf(\Tinvar\Http\Kernel::class);
     });

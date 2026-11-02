@@ -628,3 +628,20 @@ final class App
         return \is_array($decoded) ? $decoded : [];
     }
 }
+
+/** A query on a tenant's host, reading no tenant from it. */
+#[Query(name: 'notes.leaky'), Domain('{tenant}.{root}'), NoAuthorization(reason: 'a fixture refused before it runs')]
+final readonly class LeakyNoteBodies
+{
+    public function __construct(private Orm $orm) {}
+
+    /** @return list<string> */
+    public function __invoke(): array
+    {
+        return bodies($this->orm);
+    }
+}
+
+/** A channel on a tenant's host, reading no tenant from it. */
+#[\Tinvar\Attributes\Channel('notes.leaky', message: TextData::class), Domain('{tenant}.{root}'), NoAuthorization(reason: 'a fixture refused before it runs')]
+final readonly class LeakyNoteFeed {}

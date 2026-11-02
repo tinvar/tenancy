@@ -78,10 +78,10 @@ abstract class TenantAdministrationPolicy
     }
 
     /**
-     * Anyone holding the link: an invite names an address, not an account,
-     * and Invitations checks the link -- its tenant, its origin, its expiry,
-     * its single use, and the inviter's right to send it -- before it grants
-     * anything, to that address's account alone.
+     * Anyone holding the link may see it; accepting it takes someone signed
+     * in as the invited address's account, and Invitations checks the link
+     * -- its tenant, its origin, its expiry, its single use, and the
+     * inviter's right to send it -- before anything is granted.
      *
      * @param array<string, mixed> $arguments
      */

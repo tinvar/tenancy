@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tinvar\Tenancy\SelfService;
 
+use Tinvar\Audit\AuditLog;
 use Tinvar\Auth\AuthContext;
 use Tinvar\Auth\Memberships;
 use Tinvar\Auth\TenantMemberships;
@@ -72,6 +73,9 @@ final readonly class TenantSelfService
 
     public ?TlsAskEndpoint $tlsAsk;
 
+    /** Where every change is recorded: the given activity, the audit log, or nowhere. */
+    public TenantActivity $activity;
+
     /**
      * @param Memberships&TenantMemberships $memberships the application's memberships, which
      *        the switcher lists and every panel checks -- DatabaseTenantMembers, or its own
@@ -85,6 +89,9 @@ final readonly class TenantSelfService
      * @param list<string> $reservedSlugs slugs beside `admin`, `www` and the platform's hosts' that
      *        no tenant may take
      * @param string $invitePath the path an invite lands on: the application's AcceptInvitationPage
+     * @param TenantActivity|null $activity where every change is recorded; the audit log's when
+     *        $audit is given (AuditedTenantActivity), nowhere otherwise
+     * @param AuditLog|null $audit the application's audit log (ADR 0156)
      * @param bool $localHttp emailed links and addresses on http://localhost, in development
      */
     public function __construct(
@@ -107,11 +114,13 @@ final readonly class TenantSelfService
         ?DnsResolver $dns = null,
         ?ProbeAccess $probeAccess = null,
         public TenantRoles $roles = new TenantRoles(),
-        public TenantActivity $activity = new UnrecordedTenantActivity(),
+        ?TenantActivity $activity = null,
+        ?AuditLog $audit = null,
         array $reservedSlugs = [],
         string $invitePath = '/invite',
         bool $localHttp = false,
     ) {
+        $this->activity = $activity ?? ($audit === null ? new UnrecordedTenantActivity() : new AuditedTenantActivity($audit));
         $this->switchboard = new TenantSwitchboard($orm, $auth, $memberships, $this->activity, $realms, $addresses, $switcher, $profiles);
         $this->links = new TenantLinks($canonical, $addresses, $localHttp);
         $this->invitePolicy = new RoleInvitePolicy($members, $this->roles);

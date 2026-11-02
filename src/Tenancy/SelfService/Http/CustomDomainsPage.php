@@ -62,7 +62,7 @@ abstract class CustomDomainsPage extends SelfServicePage
     }
 
     /** Claims a domain: pending, until its records are there and a check proves them. */
-    #[Action, Authorize(TenantAbility::ManageDomains->value, TenantAdministration::class)]
+    #[Action(transaction: true), Authorize(TenantAbility::ManageDomains->value, TenantAdministration::class)]
     final public function add(AddDomainRequest $input): ActionResult
     {
         $domain = $this->claims->add($this->tenant(), $input->host, $this->auth->user());
@@ -71,7 +71,7 @@ abstract class CustomDomainsPage extends SelfServicePage
     }
 
     /** Checks a domain now: its ownership and DNS, or -- once in service -- its re-verification. */
-    #[Action, Authorize(TenantAbility::ManageDomains->value, TenantAdministration::class)]
+    #[Action(transaction: true), Authorize(TenantAbility::ManageDomains->value, TenantAdministration::class)]
     final public function check(DomainRequest $input): ActionResult
     {
         $domain = $this->claims->check($this->tenant(), $input->domain, $this->auth->user());
@@ -80,7 +80,7 @@ abstract class CustomDomainsPage extends SelfServicePage
     }
 
     /** Removes a domain: it is no longer served, from the next request on. */
-    #[Action, Authorize(TenantAbility::ManageDomains->value, TenantAdministration::class)]
+    #[Action(transaction: true), Authorize(TenantAbility::ManageDomains->value, TenantAdministration::class)]
     final public function remove(DomainRequest $input): ActionResult
     {
         $this->claims->remove($this->tenant(), $input->domain, $this->auth->user());

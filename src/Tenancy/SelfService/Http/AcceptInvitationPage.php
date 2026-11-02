@@ -8,6 +8,7 @@ use Tinvar\Accounts\AccountUsers;
 use Tinvar\Actions\ActionResult;
 use Tinvar\Attributes\Action;
 use Tinvar\Attributes\Authorize;
+use Tinvar\Auth\AuthContext;
 use Tinvar\Auth\Gate;
 use Tinvar\Http\Request;
 use Tinvar\Identity\EmailLinks;
@@ -33,13 +34,15 @@ use Tinvar\Validation\ValidationException;
  *       Domain('{tenant}.{root}'), TenantFrom(Host::class)]
  *     final class OrganizationInvitation extends AcceptInvitationPage {}
  *
- * In no panel: the person accepting is no member yet. The link is the
- * credential (`acceptTenantInvite`), and Invitations holds it to everything
- * else -- this tenant, this origin, a week, once, and an inviter who may
- * still send it. Accepting joins the account of the invited address, never
- * the account the browser happens to be signed in as, to this tenant alone,
- * in the role the invite's record names; an address with no account yet is
- * told to make one, and the invite is left open for when it has.
+ * In no panel: the person accepting is no member yet. Anyone holding the
+ * link may open the page (`acceptTenantInvite`); Invitations holds the link
+ * to everything else -- this tenant, this origin, a week, once, and an
+ * inviter who may still send it. Accepting takes someone signed in as the
+ * account of the invited address -- a link forwarded, or opened in a
+ * browser signed in as someone else, joins nobody -- and joins that account
+ * to this tenant alone, in the role the invite's record names. An address
+ * with no account yet is told to make one, and the invite is left open for
+ * when it has.
  */
 #[Authorize(TenantAbility::AcceptInvite->value, TenantAdministration::class)]
 abstract class AcceptInvitationPage extends SelfServicePage
@@ -54,6 +57,7 @@ abstract class AcceptInvitationPage extends SelfServicePage
         protected readonly AccountUsers $accounts,
         protected readonly TenantActivity $activity,
         protected readonly TenantRoles $roles,
+        protected readonly AuthContext $auth,
     ) {
         parent::__construct($orm, $gate);
     }
@@ -64,19 +68,21 @@ abstract class AcceptInvitationPage extends SelfServicePage
         $token = $request->query[EmailLinks::PARAMETER] ?? null;
         $invitation = \is_string($token) && $token !== '' ? $this->invitations->open($token, $this->links->originFor($tenant), $tenant) : null;
         if ($invitation === null) {
-            return new InvitationPageData(false, '', '', '', false);
+            return new InvitationPageData(false, '', '', '', false, false);
         }
+        $account = $this->accounts->findByEmail($invitation->email);
 
         return new InvitationPageData(
             true,
             $this->profiles->profile($tenant)->name ?? $tenant,
             $invitation->email,
             $this->roles->of($invitation->role)?->label() ?? $invitation->role,
-            $this->accounts->findByEmail($invitation->email) !== null,
+            $account !== null,
+            $account !== null && $account->authIdentifier() === $this->auth->id(),
         );
     }
 
-    #[Action, Authorize(TenantAbility::AcceptInvite->value, TenantAdministration::class)]
+    #[Action(transaction: true), Authorize(TenantAbility::AcceptInvite->value, TenantAdministration::class)]
     final public function accept(AcceptInvitationRequest $input): ActionResult
     {
         $tenant = $this->tenant();
@@ -88,6 +94,9 @@ abstract class AcceptInvitationPage extends SelfServicePage
             ?? throw new ValidationException(['token' => ['This invite has expired, was revoked or was used already. Ask for a new one.']]);
         $account = $this->accounts->findByEmail($open->email)
             ?? throw new ValidationException(['token' => ["Create an account with {$open->email} first, then open this link again."]]);
+        if ($account->authIdentifier() !== $this->auth->id()) {
+            throw new ValidationException(['token' => ["This invite is for {$open->email}: sign in as that account, then accept it."]]);
+        }
 
         $invitation = $this->invitations->accept($input->token, $origin, $tenant)
             ?? throw new ValidationException(['token' => ['This invite has expired, was revoked or was used already. Ask for a new one.']]);

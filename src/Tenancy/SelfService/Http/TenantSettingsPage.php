@@ -96,7 +96,7 @@ abstract class TenantSettingsPage extends SelfServicePage
         );
     }
 
-    #[Action, Authorize(TenantAbility::ManageSettings->value, TenantAdministration::class)]
+    #[Action(transaction: true), Authorize(TenantAbility::ManageSettings->value, TenantAdministration::class)]
     final public function rename(RenameTenantRequest $input): ActionResult
     {
         $this->settings->rename($this->tenant(), $input->name, $this->actor());
@@ -104,7 +104,7 @@ abstract class TenantSettingsPage extends SelfServicePage
         return $this->again();
     }
 
-    #[Action, Authorize(TenantAbility::ManageSettings->value, TenantAdministration::class)]
+    #[Action(transaction: true), Authorize(TenantAbility::ManageSettings->value, TenantAdministration::class)]
     final public function changeSlug(ChangeSlugRequest $input, Request $request): ActionResult
     {
         $tenant = $this->tenant();
@@ -121,7 +121,7 @@ abstract class TenantSettingsPage extends SelfServicePage
         return $this->again();
     }
 
-    #[Action, Authorize(TenantAbility::ManageMembers->value, TenantAdministration::class)]
+    #[Action(transaction: true), Authorize(TenantAbility::ManageMembers->value, TenantAdministration::class)]
     final public function invite(InviteMemberRequest $input): ActionResult
     {
         $this->settings->invite($this->tenant(), $this->panel(), $input->email, $input->role, $this->actor());
@@ -129,7 +129,7 @@ abstract class TenantSettingsPage extends SelfServicePage
         return $this->again(['invited' => strtolower(trim($input->email))]);
     }
 
-    #[Action, Authorize(TenantAbility::ManageMembers->value, TenantAdministration::class)]
+    #[Action(transaction: true), Authorize(TenantAbility::ManageMembers->value, TenantAdministration::class)]
     final public function revokeInvite(InviteRequest $input): ActionResult
     {
         $this->settings->revokeInvite($this->tenant(), $this->panel(), $input->invite, $this->actor());
@@ -137,7 +137,7 @@ abstract class TenantSettingsPage extends SelfServicePage
         return $this->again();
     }
 
-    #[Action, Authorize(TenantAbility::ManageMembers->value, TenantAdministration::class)]
+    #[Action(transaction: true), Authorize(TenantAbility::ManageMembers->value, TenantAdministration::class)]
     final public function changeRole(ChangeRoleRequest $input): ActionResult
     {
         $this->settings->changeRole($this->tenant(), $this->panel(), $input->member, $input->role, $this->actor());
@@ -145,7 +145,7 @@ abstract class TenantSettingsPage extends SelfServicePage
         return $this->again();
     }
 
-    #[Action, Authorize(TenantAbility::ManageMembers->value, TenantAdministration::class)]
+    #[Action(transaction: true), Authorize(TenantAbility::ManageMembers->value, TenantAdministration::class)]
     final public function removeMember(MemberRequest $input): ActionResult
     {
         $this->settings->removeMember($this->tenant(), $this->panel(), $input->member, $this->actor());

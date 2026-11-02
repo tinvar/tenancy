@@ -224,6 +224,18 @@ describe('a route on a {tenant} host', function () {
         'an action reading none' => [[], [\Tinvar\Tests\Tenancy\Fixtures\Domains\LeakyActions::class], 'LeakyActions::leak()', 'nowhere'],
     ]);
 
+    it('is refused in a panel living on a {tenant} host, though it declares no #[Domain] of its own', function () {
+        // Held to acme.example.test by its panel, it ran as the session's
+        // tenant: globex's, under acme's subdomain.
+        expect(fn () => new App(
+            new Database()->connection,
+            global: [SignIn::class, SessionTenant::class],
+            actions: [\Tinvar\Tests\Tenancy\Fixtures\Domains\PanelLeakyActions::class],
+            panelRegistry: new \Tinvar\Auth\PanelRegistry(new \Tinvar\Auth\PanelDefinition('customer', domain: '{tenant}.{root}')),
+            memberships: new \Tinvar\Tests\Tenancy\Fixtures\Domains\Customers(),
+        ))->toThrow(\InvalidArgumentException::class, 'PanelLeakyActions::leak() is on {tenant}.{root}, whose {tenant} names the tenant, and it reads its tenant from nowhere');
+    });
+
     it('says how to fix it', function () {
         expect(fn () => new App(new Database()->connection, routes: [\Tinvar\Tests\Tenancy\Fixtures\Domains\LeakyNotes::class]))
             ->toThrow(\InvalidArgumentException::class, 'Declare #[TenantFrom(Host::class)] (tinvar/tenancy) on it or a layout above it');

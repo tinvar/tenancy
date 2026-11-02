@@ -285,6 +285,19 @@ final readonly class LeakyActions
     }
 }
 
+/** An action in a panel living on a tenant's host, declaring no #[Domain] of its own and reading no tenant from it. */
+#[\Tinvar\Attributes\Panel('customer')]
+final readonly class PanelLeakyActions
+{
+    public function __construct(private Orm $orm) {}
+
+    #[Action(name: 'panel.leak'), NoAuthorization(reason: 'a fixture refused before it runs')]
+    public function leak(): ActionResult
+    {
+        return ActionResult::ok($this->orm->tenant());
+    }
+}
+
 #[Page('/', view: 'home', name: 'home')]
 final class Home
 {

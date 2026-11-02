@@ -10,6 +10,7 @@ use Tinvar\Attributes\Page;
 use Tinvar\Auth\Gate;
 use Tinvar\Http\HttpException;
 use Tinvar\Orm\Orm;
+use Tinvar\Support\Str;
 use Tinvar\Tenancy\SelfService\TenantAbility;
 use Tinvar\Tenancy\SelfService\TenantAdministration;
 
@@ -47,6 +48,16 @@ abstract class SelfServicePage
     final protected function may(TenantAbility $ability): bool
     {
         return $this->gate->allows(new Authorize($ability->value, TenantAdministration::class), []);
+    }
+
+    /**
+     * The wire name of one of the page's own actions, `<Class>.<method>`, as
+     * the action registry names it: what the view posts its forms to, so one
+     * view serves whatever the application called its class.
+     */
+    final protected function action(string $method): string
+    {
+        return Str::shortName(static::class) . '.' . $method;
     }
 
     /**

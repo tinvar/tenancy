@@ -20,6 +20,7 @@ use Tinvar\Routing\HostMatch;
 use Tinvar\Tenancy\SelfService\Data\TenantInviteData;
 use Tinvar\Tenancy\SelfService\Data\TenantMemberData;
 use Tinvar\Tenancy\SelfService\Data\TenantRoleData;
+use Tinvar\Tenancy\SelfService\Data\TenantSettingsActionsData;
 use Tinvar\Tenancy\SelfService\Data\TenantSettingsPageData;
 use Tinvar\Tenancy\SelfService\Requests\ChangeRoleRequest;
 use Tinvar\Tenancy\SelfService\Requests\ChangeSlugRequest;
@@ -93,6 +94,14 @@ abstract class TenantSettingsPage extends SelfServicePage
             ),
             canManageSettings: $this->may(TenantAbility::ManageSettings),
             canManageMembers: $this->may(TenantAbility::ManageMembers),
+            actions: new TenantSettingsActionsData(
+                rename: $this->action('rename'),
+                changeSlug: $this->action('changeSlug'),
+                invite: $this->action('invite'),
+                revokeInvite: $this->action('revokeInvite'),
+                changeRole: $this->action('changeRole'),
+                removeMember: $this->action('removeMember'),
+            ),
         );
     }
 

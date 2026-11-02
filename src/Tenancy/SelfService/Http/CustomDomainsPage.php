@@ -58,6 +58,9 @@ abstract class CustomDomainsPage extends SelfServicePage
             array_map($this->data(...), $this->claims->of($tenant)),
             $this->claims->limit(),
             $this->may(TenantAbility::ManageDomains),
+            $this->action('add'),
+            $this->action('check'),
+            $this->action('remove'),
         );
     }
 

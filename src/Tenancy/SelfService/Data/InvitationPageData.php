@@ -21,5 +21,6 @@ final readonly class InvitationPageData extends Data
         public string $role,
         public bool $accountExists,
         public bool $signedInAsInvitee,
+        public string $acceptAction,
     ) {}
 }

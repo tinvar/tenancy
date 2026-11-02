@@ -9,6 +9,7 @@ use Tinvar\Attributes\Action;
 use Tinvar\Attributes\Authorize;
 use Tinvar\Auth\PanelContext;
 use Tinvar\Http\Request;
+use Tinvar\Support\Str;
 use Tinvar\Tenancy\SelfService\Data\TenantChoiceData;
 use Tinvar\Tenancy\SelfService\Data\TenantSwitchPageData;
 use Tinvar\Tenancy\SelfService\Requests\SwitchTenantRequest;
@@ -57,7 +58,7 @@ abstract class TenantSwitchPage
             }
         }
 
-        return new TenantSwitchPageData(array_map(TenantChoiceData::of(...), $choices), $current);
+        return new TenantSwitchPageData(array_map(TenantChoiceData::of(...), $choices), $current, Str::shortName(static::class) . '.switchTo');
     }
 
     #[Action, Authorize(TenantAbility::SwitchTenant->value, TenantAdministration::class)]

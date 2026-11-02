@@ -68,7 +68,7 @@ abstract class AcceptInvitationPage extends SelfServicePage
         $token = $request->query[EmailLinks::PARAMETER] ?? null;
         $invitation = \is_string($token) && $token !== '' ? $this->invitations->open($token, $this->links->originFor($tenant), $tenant) : null;
         if ($invitation === null) {
-            return new InvitationPageData(false, '', '', '', false, false);
+            return new InvitationPageData(false, '', '', '', false, false, $this->action('accept'));
         }
         $account = $this->accounts->findByEmail($invitation->email);
 
@@ -79,6 +79,7 @@ abstract class AcceptInvitationPage extends SelfServicePage
             $this->roles->of($invitation->role)?->label() ?? $invitation->role,
             $account !== null,
             $account !== null && $account->authIdentifier() === $this->auth->id(),
+            $this->action('accept'),
         );
     }
 

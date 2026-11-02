@@ -160,7 +160,7 @@ describe('invites', function () {
         $page = $world->page('/invite', 'm-4', query: ['token' => $token]);
         $accepted = $world->act('OrganizationInvitation.accept', ['token' => $token], 'm-4');
 
-        expect($page)->toBe(['open' => true, 'organization' => 'Acme', 'email' => 'dee@example.net', 'role' => 'Admin', 'accountExists' => true, 'signedInAsInvitee' => true])
+        expect($page)->toBe(['open' => true, 'organization' => 'Acme', 'email' => 'dee@example.net', 'role' => 'Admin', 'accountExists' => true, 'signedInAsInvitee' => true, 'acceptAction' => 'OrganizationInvitation.accept'])
             ->and($accepted->status)->toBe(303, $accepted->body())
             ->and($world->members->roleOf('acme', 'customer', 'm-4'))->toBe('admin')
             ->and($world->members->roleOf('initech', 'customer', 'm-4'))->toBe('owner')

@@ -8,8 +8,9 @@ use Tinvar\Data\Data;
 
 /**
  * The settings page: the organization's name and slug, its members and open
- * invites, the roles there are, and which forms to draw for the reader --
- * never what the actions allow, which ask again.
+ * invites, the roles there are, which forms to draw for the reader --
+ * never what the actions allow, which ask again -- and the actions the
+ * forms post to.
  */
 final readonly class TenantSettingsPageData extends Data
 {
@@ -26,5 +27,6 @@ final readonly class TenantSettingsPageData extends Data
         public array $roles,
         public bool $canManageSettings,
         public bool $canManageMembers,
+        public TenantSettingsActionsData $actions,
     ) {}
 }

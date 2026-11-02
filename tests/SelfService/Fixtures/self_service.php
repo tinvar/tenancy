@@ -429,7 +429,9 @@ final class AdminWorld
     /** @var CarbonImmutable now, as every clock here reads it */
     public static CarbonImmutable $now;
 
-    public function __construct(?PdoConnection $connection = null, int $limit = 3, bool $addressed = true)
+    public ?\Tinvar\Audit\AuditLog $audit = null;
+
+    public function __construct(?PdoConnection $connection = null, int $limit = 3, bool $addressed = true, bool $audited = false)
     {
         self::$now = CarbonImmutable::parse('2026-11-02 12:00:00', 'UTC');
         $database = new Database($connection);
@@ -472,6 +474,10 @@ final class AdminWorld
             },
         );
         $links = EmailLinks::fromKey(KEY, new ArrayEmailLinkStore(), $this->people);
+        if ($audited) {
+            \Tinvar\Audit\AuditTable::define($schema);
+            $this->audit = new \Tinvar\Audit\AuditLog($this->orm, $auth, KEY);
+        }
 
         $this->kit = new TenantSelfService(
             orm: $this->orm,
@@ -489,7 +495,8 @@ final class AdminWorld
             throttles: new ArrayThrottleStore(),
             domainsConfig: new CustomDomainsConfig(targets: ['domains.example.test'], platform: [ROOT], grace: 3600, limit: $limit),
             dns: $this->dns,
-            activity: $this->activity,
+            activity: $audited ? null : $this->activity,
+            audit: $this->audit,
         );
         $this->invites->invitations = $this->kit->invitations;
         $this->invites->links = $this->kit->links;

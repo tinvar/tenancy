@@ -100,12 +100,20 @@ final readonly class TenantSettings
             return;
         }
         $refusal = $this->slugs->refusal($slug);
+        if ($refusal === null) {
+            // Defence in depth, for a TenantProfiles of the application's own:
+            // a slug some tenant holds is refused before the write. It can only
+            // refuse too much -- a slug let go a moment ago -- never let one
+            // through: the store's unique index, below, is what decides.
+            $holder = $this->profiles->tenantForSlug($slug);
+            $refusal = $holder !== null && $holder !== $tenant ? (new SlugTaken($slug))->getMessage() : null;
+        }
         if ($refusal !== null) {
             throw new ValidationException(['slug' => [$refusal]]);
         }
 
-        // Taken is the store's to say, by its unique index: a read here first
-        // would race another tenant taking the slug at the same moment.
+        // Taken, finally, is the store's to say, by its unique index: the read
+        // above races another tenant taking the slug at the same moment.
         try {
             $this->profiles->changeSlug($tenant, $slug);
         } catch (SlugTaken $e) {

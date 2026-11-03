@@ -100,14 +100,12 @@ final readonly class TenantSettings
             return;
         }
         $refusal = $this->slugs->refusal($slug);
-        if ($refusal === null) {
-            $holder = $this->profiles->tenantForSlug($slug);
-            $refusal = $holder !== null && $holder !== $tenant ? "Another organization uses '{$slug}'. Choose another." : null;
-        }
         if ($refusal !== null) {
             throw new ValidationException(['slug' => [$refusal]]);
         }
 
+        // Taken is the store's to say, by its unique index: a read here first
+        // would race another tenant taking the slug at the same moment.
         try {
             $this->profiles->changeSlug($tenant, $slug);
         } catch (SlugTaken $e) {

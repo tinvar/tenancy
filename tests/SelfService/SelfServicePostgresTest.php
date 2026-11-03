@@ -13,6 +13,7 @@ declare(strict_types=1);
 namespace Tinvar\Tests\Tenancy\SelfService\Postgres;
 
 use Tinvar\Orm\PdoConnection;
+use Tinvar\Tenancy\SelfService\SlugTaken;
 use Tinvar\Tests\Orm\Fixtures\Databases;
 use Tinvar\Tests\Tenancy\SelfService\Fixtures\AdminWorld;
 
@@ -70,5 +71,18 @@ it('finds no member of another tenant, and records each change', function () {
             ->and($world->act('OrganizationSettings.changeRole', ['member' => 'm-3', 'role' => 'admin'])->status)->toBe(200)
             ->and($world->members->roleOf('acme', 'customer', 'm-3'))->toBe('admin')
             ->and($world->members->tenantsOf(new \Tinvar\Tests\Tenancy\SelfService\Fixtures\Person('m-1', '', ''), 'customer'))->toBe(['acme', 'globex']);
+    });
+})->group('pgsql')->skip(Databases::postgresMissing() !== null, Databases::postgresMissing() ?? '');
+
+it('says a slug is taken by the index, inside a transaction that goes on after it', function () {
+    onPostgres(static function (AdminWorld $world): void {
+        $world->orm->statements()->transaction(static function () use ($world): void {
+            expect(static fn () => $world->tenants->create('Acme again', 'acme'))->toThrow(SlugTaken::class)
+                ->and(static fn () => $world->tenants->changeSlug('globex', 'acme'))->toThrow(SlugTaken::class);
+            $world->tenants->create('Initech EU', 'initech-eu', id: 'initech-eu');
+        });
+
+        expect($world->tenants->slugOf('initech-eu'))->toBe('initech-eu')
+            ->and($world->tenants->slugOf('globex'))->toBe('globex');
     });
 })->group('pgsql')->skip(Databases::postgresMissing() !== null, Databases::postgresMissing() ?? '');

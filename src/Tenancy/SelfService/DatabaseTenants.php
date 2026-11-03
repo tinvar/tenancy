@@ -9,6 +9,7 @@ use Tinvar\Orm\Connection;
 use Tinvar\Orm\Schema\Schema;
 use Tinvar\Orm\Schema\Table;
 use Tinvar\Orm\TimestampStorage;
+use Tinvar\Orm\UniqueViolation;
 use Tinvar\Support\Uuid;
 use Tinvar\Tenancy\TenantDirectory;
 use Tinvar\Tenancy\TenantTree;
@@ -22,7 +23,9 @@ use Tinvar\Tenancy\TenantTree;
  * over it instead, and never makes this one.
  *
  * The slug is unique by the database: two tenants taking one at once
- * cannot both have it.
+ * cannot both have it, and the one refused is told so by the index itself
+ * (SlugTaken), never by a read before the write that the other's could
+ * overtake.
  */
 final readonly class DatabaseTenants implements TenantProfiles, TenantDirectory, TenantTree
 {
@@ -60,13 +63,10 @@ final readonly class DatabaseTenants implements TenantProfiles, TenantDirectory,
     public function create(string $name, string $slug, ?string $parent = null, ?string $id = null): string
     {
         $id ??= Uuid::v7();
-        if ($this->tenantForSlug($slug) !== null) {
-            throw new SlugTaken($slug);
-        }
-        $this->connection->execute(
+        $this->claiming($slug, fn (): int => $this->connection->execute(
             "INSERT INTO {$this->table} (id, parent_id, name, slug, created_at) VALUES (?, ?, ?, ?, ?)",
             [$id, $parent, $name, $slug, $this->timestamps->format(CarbonImmutable::now('UTC'))],
-        );
+        ));
 
         return $id;
     }
@@ -85,15 +85,24 @@ final readonly class DatabaseTenants implements TenantProfiles, TenantDirectory,
 
     public function changeSlug(string $tenant, string $slug): void
     {
-        $holder = $this->tenantForSlug($slug);
-        if ($holder !== null && $holder !== $tenant) {
-            throw new SlugTaken($slug);
-        }
+        $this->claiming($slug, fn (): int => $this->connection->execute("UPDATE {$this->table} SET slug = ? WHERE id = ?", [$slug, $tenant]));
+    }
+
+    /**
+     * $write, which gives a tenant $slug, in a transaction of its own -- a
+     * savepoint inside the caller's, so a refusal leaves that one able to go
+     * on -- with the unique index's refusal as SlugTaken. No read first: one
+     * would race another tenant's write, and the index cannot.
+     *
+     * @param \Closure(): int $write
+     * @throws SlugTaken
+     */
+    private function claiming(string $slug, \Closure $write): void
+    {
         try {
-            $this->connection->transaction(fn (): int => $this->connection->execute("UPDATE {$this->table} SET slug = ? WHERE id = ?", [$slug, $tenant]));
-        } catch (\PDOException) {
-            // Taken in between: the unique index refused it.
-            throw new SlugTaken($slug);
+            $this->connection->transaction($write);
+        } catch (\PDOException $e) {
+            throw UniqueViolation::is($e) ? new SlugTaken($slug, $e) : $e;
         }
     }
 

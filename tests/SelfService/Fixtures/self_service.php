@@ -442,21 +442,21 @@ final class AdminWorld
         TenantDomains::define($schema);
 
         $this->people = new People();
+        $this->orm = new Orm($connection, new IdentityMap('self-service-admin'), Tenancy::tree());
         $this->tenants = new DatabaseTenants($connection);
         foreach (['acme' => 'Acme', 'globex' => 'Globex', 'initech' => 'Initech'] as $id => $name) {
             $this->tenants->create($name, $id, id: $id);
         }
-        $this->members = new DatabaseTenantMembers($connection, $this->people);
+        $this->members = new DatabaseTenantMembers($this->orm, $this->people);
         foreach ([['acme', 'm-1', 'owner'], ['acme', 'm-2', 'admin'], ['acme', 'm-3', 'member'], ['globex', 'm-9', 'owner'], ['globex', 'm-1', 'member'], ['initech', 'm-4', 'owner']] as [$tenant, $user, $role]) {
             $this->members->grant($tenant, 'customer', $user, $role);
         }
 
-        $this->orm = new Orm($connection, new IdentityMap('self-service-admin'), Tenancy::tree());
         $auth = new AuthContext();
         $this->dns = new FakeDns();
         $this->activity = new RecordedActivity();
         $this->invites = new SentInvites();
-        $this->domains = new TenantDomains($connection, clock: static fn (): CarbonImmutable => self::$now);
+        $this->domains = new TenantDomains($this->orm, clock: static fn (): CarbonImmutable => self::$now);
         $directory = null;
         $domains = $this->domains;
         $tenants = $this->tenants;

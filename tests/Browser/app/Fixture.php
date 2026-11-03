@@ -305,8 +305,8 @@ final class SelfServiceApp
         $auth = new AuthContext();
         $people = new People();
         $tenants = new DatabaseTenants($connection);
-        $members = new DatabaseTenantMembers($connection, $people);
-        $domains = new TenantDomains($connection);
+        $members = new DatabaseTenantMembers($this->orm, $people);
+        $domains = new TenantDomains($this->orm);
         $invites = new FileInvites($invitesFile);
 
         $realms = new Realms(
@@ -446,7 +446,7 @@ final class SelfServiceApp
         foreach (['acme' => 'Acme', 'globex' => 'Globex', 'initech' => 'Initech'] as $id => $name) {
             $tenants->create($name, $id, id: $id);
         }
-        $members = new DatabaseTenantMembers($connection, new People());
+        $members = new DatabaseTenantMembers(new Orm($connection, new IdentityMap('tenancy-e2e-seed'), Tenancy::tree()), new People());
         foreach ([['acme', 'm-1', 'owner'], ['acme', 'm-2', 'admin'], ['acme', 'm-3', 'member'], ['globex', 'm-9', 'owner'], ['globex', 'm-1', 'member'], ['initech', 'm-4', 'owner']] as [$tenant, $user, $role]) {
             $members->grant($tenant, 'customer', $user, $role);
         }

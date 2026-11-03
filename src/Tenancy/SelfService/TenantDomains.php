@@ -9,6 +9,7 @@ use Tinvar\Identity\CustomDomain;
 use Tinvar\Identity\CustomDomains;
 use Tinvar\Identity\Realm;
 use Tinvar\Orm\Connection;
+use Tinvar\Orm\Orm;
 use Tinvar\Orm\Schema\Schema;
 use Tinvar\Orm\Schema\Table;
 use Tinvar\Orm\TimestampStorage;
@@ -32,6 +33,14 @@ use Tinvar\Support\Uuid;
  *   realm() are what the application's TenantHosts, Domains and Realms
  *   lookups read, and a pending or deactivated domain is nobody's.
  *
+ * On Postgres the table has the tenant policy (Table::tenant()), and the
+ * application's role is held to it: a tenant's own read or write runs as
+ * that tenant (Orm::actAs()), whatever tenant is in force -- another, on
+ * the switcher, or none, in a job -- and a host's holder is read inside
+ * acrossTenants(), then written as the tenant found. Without that, the
+ * policy hid every domain from the host lookups, which run with no tenant,
+ * and no custom domain was ever served.
+ *
  * A host is held by at most one tenant, by the database: an active domain
  * sets `held_host`, which is unique, so two tenants proving one host at
  * once cannot both be served on it. Pending claims hold nothing -- anyone
@@ -42,28 +51,36 @@ final readonly class TenantDomains implements CustomDomains
 {
     public const string TABLE = 'tenant_domains';
 
+    private Connection $connection;
+
     private TimestampStorage $timestamps;
 
     /** @var \Closure(): CarbonImmutable */
     private \Closure $clock;
 
-    /** @param (\Closure(): CarbonImmutable)|null $clock now; the system's, in UTC, unless given */
+    /**
+     * @param Orm $orm whose connection the table is on, and whose tenant each statement runs as
+     * @param (\Closure(): CarbonImmutable)|null $clock now; the system's, in UTC, unless given
+     */
     public function __construct(
-        private Connection $connection,
+        private Orm $orm,
         private string $table = self::TABLE,
         ?\Closure $clock = null,
     ) {
         if (preg_match('/^[a-z_][a-z0-9_]{0,62}\z/', $table) !== 1) {
             throw new \InvalidArgumentException("'{$table}' is not a table name the custom domains will write.");
         }
-        $this->timestamps = TimestampStorage::for($connection);
+        $this->connection = $orm->statements();
+        $this->timestamps = TimestampStorage::for($this->connection);
         $this->clock = $clock ?? static fn (): CarbonImmutable => CarbonImmutable::now('UTC');
     }
 
     /** The table, for the application's migration to make. */
     public static function define(Schema $schema, string $table = self::TABLE, bool $ifNotExists = false): void
     {
-        new self($schema->connection(), $table);
+        if (preg_match('/^[a-z_][a-z0-9_]{0,62}\z/', $table) !== 1) {
+            throw new \InvalidArgumentException("'{$table}' is not a table name the custom domains will write.");
+        }
 
         $schema->create($table, static function (Table $domains) use ($table): void {
             $domains->uuid('id')->primary();
@@ -99,21 +116,21 @@ final readonly class TenantDomains implements CustomDomains
     {
         return array_map(
             $this->domain(...),
-            $this->connection->select("SELECT * FROM {$this->table} WHERE tenant_id = ? ORDER BY created_at, host", [self::tenant($tenant)]),
+            $this->as($tenant, fn (): array => $this->connection->select("SELECT * FROM {$this->table} WHERE tenant_id = ? ORDER BY created_at, host", [$tenant])),
         );
     }
 
     /** One of the tenant's domains, by id; null for one that is not the tenant's. */
     public function ofTenant(string $tenant, string $id): ?TenantDomain
     {
-        $rows = $this->connection->select("SELECT * FROM {$this->table} WHERE tenant_id = ? AND id = ?", [self::tenant($tenant), $id]);
+        $rows = $this->as($tenant, fn (): array => $this->connection->select("SELECT * FROM {$this->table} WHERE tenant_id = ? AND id = ?", [$tenant, $id]));
 
         return $rows === [] ? null : $this->domain($rows[0]);
     }
 
     public function countForTenant(string $tenant): int
     {
-        $rows = $this->connection->select("SELECT COUNT(*) AS n FROM {$this->table} WHERE tenant_id = ?", [self::tenant($tenant)]);
+        $rows = $this->as($tenant, fn (): array => $this->connection->select("SELECT COUNT(*) AS n FROM {$this->table} WHERE tenant_id = ?", [$tenant]));
 
         return (int) ($rows[0]['n'] ?? 0);
     }
@@ -126,10 +143,10 @@ final readonly class TenantDomains implements CustomDomains
     public function add(string $tenant, string $host): TenantDomain
     {
         $domain = new TenantDomain(Uuid::v7(), self::tenant($tenant), self::host($host), TenantDomainStatus::Pending, bin2hex(random_bytes(16)), '', $this->now());
-        $this->connection->execute(
+        $this->as($tenant, fn (): int => $this->connection->execute(
             "INSERT INTO {$this->table} (id, tenant_id, host, held_host, status, token, reason, created_at) VALUES (?, ?, ?, NULL, ?, ?, '', ?)",
             [$domain->id, $domain->tenant, $domain->host, $domain->status->value, $domain->token, $this->timestamps->format($domain->createdAt)],
-        );
+        ));
 
         return $domain;
     }
@@ -137,7 +154,7 @@ final readonly class TenantDomains implements CustomDomains
     /** Removes one of the tenant's domains: no longer served, from the next request. */
     public function remove(string $tenant, string $id): bool
     {
-        return $this->connection->execute("DELETE FROM {$this->table} WHERE tenant_id = ? AND id = ?", [self::tenant($tenant), $id]) === 1;
+        return $this->as($tenant, fn (): int => $this->connection->execute("DELETE FROM {$this->table} WHERE tenant_id = ? AND id = ?", [$tenant, $id])) === 1;
     }
 
     /**
@@ -160,11 +177,11 @@ final readonly class TenantDomains implements CustomDomains
         try {
             // In a transaction of its own -- a savepoint inside the action's --
             // so a refusal by the index leaves the action's able to go on.
-            return $this->connection->transaction(fn (): bool => $this->connection->execute(
+            return $this->as($domain->tenant, fn (): bool => $this->connection->transaction(fn (): bool => $this->connection->execute(
                 "UPDATE {$this->table} SET status = ?, held_host = host, reason = ?, checked_at = ?, verified_at = ?, failing_since = NULL, deactivated_at = NULL "
                 . 'WHERE tenant_id = ? AND id = ?',
                 [TenantDomainStatus::Verified->value, $reason, $when, $when, $domain->tenant, $id],
-            ) === 1);
+            ) === 1));
         } catch (\PDOException) {
             // Another tenant's proof of the same host committed in between:
             // the unique index on held_host refused this one.
@@ -175,16 +192,16 @@ final readonly class TenantDomains implements CustomDomains
     /** A check of a domain not in service found it not yet proved: why, and when. */
     public function unproved(string $tenant, string $id, CarbonImmutable $at, string $reason): void
     {
-        $this->connection->execute(
+        $this->as($tenant, fn (): int => $this->connection->execute(
             "UPDATE {$this->table} SET checked_at = ?, reason = ? WHERE tenant_id = ? AND id = ? AND held_host IS NULL",
-            [$this->timestamps->format($at), $reason, self::tenant($tenant), $id],
-        );
+            [$this->timestamps->format($at), $reason, $tenant, $id],
+        ));
     }
 
     /** The tenant serving $host, or null: a pending, deactivated or unknown host is nobody's. */
     public function tenantForHost(string $host): ?string
     {
-        $rows = $this->connection->select("SELECT tenant_id FROM {$this->table} WHERE held_host = ?", [$host]);
+        $rows = $this->orm->acrossTenants(fn (): array => $this->connection->select("SELECT tenant_id FROM {$this->table} WHERE held_host = ?", [$host]));
         $tenant = $rows[0]['tenant_id'] ?? null;
 
         return \is_string($tenant) && $tenant !== '' ? $tenant : null;
@@ -197,10 +214,10 @@ final readonly class TenantDomains implements CustomDomains
      */
     public function primaryFor(string $tenant): ?string
     {
-        $rows = $this->connection->select(
+        $rows = $this->as($tenant, fn (): array => $this->connection->select(
             "SELECT held_host FROM {$this->table} WHERE tenant_id = ? AND held_host IS NOT NULL ORDER BY verified_at, held_host LIMIT 1",
-            [self::tenant($tenant)],
-        );
+            [$tenant],
+        ));
         $host = $rows[0]['held_host'] ?? null;
 
         return \is_string($host) && $host !== '' ? $host : null;
@@ -238,42 +255,42 @@ final readonly class TenantDomains implements CustomDomains
 
     public function due(\DateTimeImmutable $since, int $limit): array
     {
-        $rows = $this->connection->select(
+        $rows = $this->orm->acrossTenants(fn (): array => $this->connection->select(
             "SELECT * FROM {$this->table} WHERE held_host IS NOT NULL AND (checked_at IS NULL OR checked_at < ?) "
             . 'ORDER BY checked_at IS NOT NULL, checked_at, held_host LIMIT ' . max(1, $limit),
             [$this->timestamps->format($since)],
-        );
+        ));
 
         return array_map(fn (array $row): CustomDomain => $this->domain($row)->custom(), $rows);
     }
 
     public function find(string $host): ?CustomDomain
     {
-        $rows = $this->connection->select("SELECT * FROM {$this->table} WHERE held_host = ?", [$host]);
+        $rows = $this->orm->acrossTenants(fn (): array => $this->connection->select("SELECT * FROM {$this->table} WHERE held_host = ?", [$host]));
         if ($rows !== []) {
             return $this->domain($rows[0])->custom();
         }
 
         // Out of service: the last one deactivated, which nothing serves.
-        $rows = $this->connection->select(
+        $rows = $this->orm->acrossTenants(fn (): array => $this->connection->select(
             "SELECT * FROM {$this->table} WHERE host = ? AND status = ? ORDER BY deactivated_at DESC LIMIT 1",
             [$host, TenantDomainStatus::Deactivated->value],
-        );
+        ));
 
         return $rows === [] ? null : $this->domain($rows[0])->custom();
     }
 
     public function passed(string $host, \DateTimeImmutable $at): void
     {
-        $this->connection->execute(
+        $this->asHolderOf($host, fn (): int => $this->connection->execute(
             "UPDATE {$this->table} SET status = ?, checked_at = ?, failing_since = NULL, reason = ? WHERE held_host = ?",
             [TenantDomainStatus::Verified->value, $this->timestamps->format($at), 'It points at the platform.', $host],
-        );
+        ));
     }
 
     public function failed(string $host, \DateTimeImmutable $at, \DateTimeImmutable $failingSince): void
     {
-        $this->connection->execute(
+        $this->asHolderOf($host, fn (): int => $this->connection->execute(
             "UPDATE {$this->table} SET status = ?, checked_at = ?, failing_since = ?, reason = ? WHERE held_host = ?",
             [
                 TenantDomainStatus::Failing->value,
@@ -282,15 +299,44 @@ final readonly class TenantDomains implements CustomDomains
                 'Its DNS could not be read at the last check. It stays in service for now; check its records.',
                 $host,
             ],
-        );
+        ));
     }
 
     public function deactivate(string $host, string $reason, \DateTimeImmutable $at): void
     {
-        $this->connection->execute(
+        $this->asHolderOf($host, fn (): int => $this->connection->execute(
             "UPDATE {$this->table} SET status = ?, held_host = NULL, checked_at = ?, deactivated_at = ?, reason = ? WHERE held_host = ?",
             [TenantDomainStatus::Deactivated->value, $this->timestamps->format($at), $this->timestamps->format($at), $reason, $host],
-        );
+        ));
+    }
+
+    /**
+     * $work as $tenant, so the tenant policy shows it the tenant's rows
+     * whatever tenant is in force: another, or none.
+     *
+     * @template T
+     * @param \Closure(): T $work
+     * @return T
+     */
+    private function as(string $tenant, \Closure $work): mixed
+    {
+        return $this->orm->actAs(self::tenant($tenant), $work);
+    }
+
+    /**
+     * $work as the tenant holding $host, found across tenants; nothing for
+     * a host nobody holds. A write as that tenant names whose row it
+     * changed, where one inside acrossTenants() could name nobody's (ADR
+     * 0122); and one whose holder changed in between matches no row.
+     *
+     * @param \Closure(): int $work
+     */
+    private function asHolderOf(string $host, \Closure $work): void
+    {
+        $tenant = $this->tenantForHost($host);
+        if ($tenant !== null) {
+            $this->as($tenant, $work);
+        }
     }
 
     /** @param array<string, mixed> $row */

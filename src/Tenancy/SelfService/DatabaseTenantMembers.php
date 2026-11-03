@@ -12,6 +12,7 @@ use Tinvar\Auth\Memberships;
 use Tinvar\Auth\TenantMemberships;
 use Tinvar\Auth\UserLookup;
 use Tinvar\Orm\Connection;
+use Tinvar\Orm\Orm;
 use Tinvar\Orm\Schema\Schema;
 use Tinvar\Orm\Schema\Table;
 use Tinvar\Orm\TimestampStorage;
@@ -23,23 +24,31 @@ use Tinvar\Orm\TimestampStorage;
  * so the member the page lists is the member every panel lets in, with the
  * permissions their role grants (TenantRoles).
  *
- * Every read and write names its tenant and panel. A row whose role no
+ * Every read and write names its tenant and panel, and runs as that tenant
+ * (Orm::actAs()), so the tenant policy the table has on Postgres
+ * (Table::tenant()) shows it the tenant's rows whatever tenant is in
+ * force; tenantsOf(), a user's tenants, reads across them. Without that,
+ * the switcher listed only the tenant in force and a membership of
+ * another tenant read as none. A row whose role no
  * case of the application's enum has grants nothing, and is no membership.
  */
 final readonly class DatabaseTenantMembers implements TenantMembers, Memberships, TenantMemberships
 {
     public const string TABLE = 'tenant_members';
 
+    private Connection $connection;
+
     private TimestampStorage $timestamps;
 
     /**
+     * @param Orm $orm whose connection the table is on, and whose tenant each statement runs as
      * @param UserLookup $users who each member is, for their name and address: an
      *        AccountUser's, or their id alone
      * @param \Closure(string): (\UnitEnum|string)|null $kindOf a tenant's kind, which
      *        #[Panel(requires:)] is held to; '' for every tenant unless given
      */
     public function __construct(
-        private Connection $connection,
+        private Orm $orm,
         private UserLookup $users,
         private TenantRoles $roles = new TenantRoles(),
         private string $table = self::TABLE,
@@ -48,7 +57,8 @@ final readonly class DatabaseTenantMembers implements TenantMembers, Memberships
         if (preg_match('/^[a-z_][a-z0-9_]{0,62}\z/', $table) !== 1) {
             throw new \InvalidArgumentException("'{$table}' is not a table name the members will be kept in.");
         }
-        $this->timestamps = TimestampStorage::for($connection);
+        $this->connection = $orm->statements();
+        $this->timestamps = TimestampStorage::for($this->connection);
     }
 
     /**
@@ -76,10 +86,10 @@ final readonly class DatabaseTenantMembers implements TenantMembers, Memberships
 
     public function members(string $tenant, string $panel): array
     {
-        $rows = $this->connection->select(
+        $rows = $this->as($tenant, fn (): array => $this->connection->select(
             "SELECT user_id, role FROM {$this->table} WHERE tenant_id = ? AND panel = ? ORDER BY created_at, user_id",
             [$tenant, $panel],
-        );
+        ));
 
         return array_map(function (array $row): TenantMember {
             $id = (string) $row['user_id'];
@@ -96,10 +106,10 @@ final readonly class DatabaseTenantMembers implements TenantMembers, Memberships
 
     public function roleOf(string $tenant, string $panel, string $userId): ?string
     {
-        $rows = $this->connection->select(
+        $rows = $this->as($tenant, fn (): array => $this->connection->select(
             "SELECT role FROM {$this->table} WHERE tenant_id = ? AND panel = ? AND user_id = ?",
             [$tenant, $panel, $userId],
-        );
+        ));
         $role = $rows[0]['role'] ?? null;
 
         return \is_string($role) ? $role : null;
@@ -110,23 +120,23 @@ final readonly class DatabaseTenantMembers implements TenantMembers, Memberships
         if ($tenant === '' || $this->roleOf($tenant, $panel, $userId) !== null) {
             return;
         }
-        $this->connection->execute(
+        $this->as($tenant, fn (): int => $this->connection->execute(
             "INSERT INTO {$this->table} (tenant_id, user_id, panel, role, created_at) VALUES (?, ?, ?, ?, ?)",
             [$tenant, $userId, $panel, $role, $this->timestamps->format(CarbonImmutable::now('UTC'))],
-        );
+        ));
     }
 
     public function changeRole(string $tenant, string $panel, string $userId, string $role): void
     {
-        $this->connection->execute(
+        $this->as($tenant, fn (): int => $this->connection->execute(
             "UPDATE {$this->table} SET role = ? WHERE tenant_id = ? AND panel = ? AND user_id = ?",
             [$role, $tenant, $panel, $userId],
-        );
+        ));
     }
 
     public function remove(string $tenant, string $panel, string $userId): void
     {
-        $this->connection->execute("DELETE FROM {$this->table} WHERE tenant_id = ? AND panel = ? AND user_id = ?", [$tenant, $panel, $userId]);
+        $this->as($tenant, fn (): int => $this->connection->execute("DELETE FROM {$this->table} WHERE tenant_id = ? AND panel = ? AND user_id = ?", [$tenant, $panel, $userId]));
     }
 
     public function membership(Authenticatable $user, string $panel, string $tenant): ?Membership
@@ -144,11 +154,24 @@ final readonly class DatabaseTenantMembers implements TenantMembers, Memberships
 
     public function tenantsOf(Authenticatable $user, string $panel): array
     {
-        $rows = $this->connection->select(
+        $rows = $this->orm->acrossTenants(fn (): array => $this->connection->select(
             "SELECT tenant_id FROM {$this->table} WHERE user_id = ? AND panel = ? ORDER BY created_at, tenant_id",
             [$user->authIdentifier(), $panel],
-        );
+        ));
 
         return array_map(static fn (array $row): string => (string) $row['tenant_id'], $rows);
+    }
+
+    /**
+     * $work as $tenant; as it stands for none, whose statements name no
+     * tenant's rows.
+     *
+     * @template T
+     * @param \Closure(): T $work
+     * @return T
+     */
+    private function as(string $tenant, \Closure $work): mixed
+    {
+        return $tenant === '' ? $work() : $this->orm->actAs($tenant, $work);
     }
 }

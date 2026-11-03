@@ -38,7 +38,7 @@ use Tinvar\Tenancy\TenantSwitching;
  *         orm: $orm, auth: $auth, memberships: $members, realms: $realms,
  *         profiles: $tenants, members: $members, emailLinks: $links, users: $users,
  *         canonical: $origins, addresses: new SubdomainAddresses(...),
- *         domains: new TenantDomains($connection), throttles: $throttleStore,
+ *         domains: new TenantDomains($orm), throttles: $throttleStore,
  *         dispatcher: $dispatcher,
  *     );
  *     $selfService->register($container);

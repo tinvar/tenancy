@@ -25,7 +25,11 @@ use Tinvar\Validation\ValidationException;
  *   -- only when it grants nothing their own role does not, and may change
  *   or remove only a member whose role grants nothing theirs does not.
  * - **No tenant is locked out.** A change or a removal that would leave no
- *   member able to manage members is refused, the member's own included.
+ *   member holding a permission some member held before -- to manage
+ *   members, settings or domains -- is refused, the member's own included:
+ *   no one climbs, so a permission nobody holds is never given again (an
+ *   only owner stepping down to admin left no one able to rename the
+ *   tenant or change its slug).
  * - **A slug** is held to SlugRules -- `admin`, `www`, the platform's own
  *   hosts -- and to being nobody else's, by the store.
  *
@@ -180,17 +184,28 @@ final readonly class TenantSettings
         }
     }
 
-    /** Refuses a change leaving no member of the panel able to manage its members. */
+    /**
+     * Refuses a change leaving no member of the panel holding a permission
+     * one held before it: since no one gives a role granting more than
+     * their own, a permission nobody holds is never given again.
+     */
     private function assertNotLockedOut(string $tenant, string $panel, string $changed, ?string $next): void
     {
+        $before = [];
+        $after = [];
         foreach ($this->members->members($tenant, $panel) as $member) {
-            $role = $member->userId === $changed ? $next : $member->role;
-            if (\in_array(TenantPermission::Members->value, $this->roles->permissionsOf($role), true)) {
-                return;
-            }
+            $before = [...$before, ...$this->roles->permissionsOf($member->role)];
+            $after = [...$after, ...$this->roles->permissionsOf($member->userId === $changed ? $next : $member->role)];
         }
 
-        throw new ValidationException(['member' => ['Someone must be left who can manage members: give another member that role first.']]);
+        $lost = array_values(array_diff(array_unique($before), $after));
+        if ($lost === []) {
+            return;
+        }
+
+        throw new ValidationException(['member' => [\in_array(TenantPermission::Members->value, $lost, true)
+            ? 'Someone must be left who can manage members: give another member that role first.'
+            : 'Someone must be left whose role grants ' . implode(', ', $lost) . ': give another member that role first.']]);
     }
 
     private static function notFound(string $what): HttpException

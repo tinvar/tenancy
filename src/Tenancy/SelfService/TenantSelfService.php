@@ -27,6 +27,7 @@ use Tinvar\Jobs\Dispatcher;
 use Tinvar\Observability\ProbeAccess;
 use Tinvar\Orm\Orm;
 use Tinvar\Orm\Schema\Schema;
+use Tinvar\Routing\Domains;
 use Tinvar\Tenancy\TenantSwitching;
 
 /**
@@ -73,6 +74,9 @@ final readonly class TenantSelfService
 
     public ?TlsAskEndpoint $tlsAsk;
 
+    /** The slugs a tenant may take: what a sign-up holds a new tenant's slug to, as the settings do. */
+    public SlugRules $slugs;
+
     /** Where every change is recorded: the given activity, the audit log, or nowhere. */
     public TenantActivity $activity;
 
@@ -86,7 +90,9 @@ final readonly class TenantSelfService
      * @param TenantDomains|null $domains the custom domains' table; none, and no tenant adds one
      * @param ThrottleStore|null $throttles the store the application's throttles count in, which
      *        the TLS ask claims a domain's one check at a time in: needed with $domains
-     * @param list<string> $reservedSlugs slugs beside `admin`, `www` and the platform's hosts' that
+     * @param Domains|null $routing the application's Domains, where it routes by host: every
+     *        label of every host it routes is reserved as a slug, as the realms' hosts' are
+     * @param list<string> $reservedSlugs slugs beside `admin`, `api`, `www` and the platform's hosts' that
      *        no tenant may take
      * @param string $invitePath the path an invite lands on: the application's AcceptInvitationPage
      * @param TenantActivity|null $activity where every change is recorded; the audit log's when
@@ -117,6 +123,7 @@ final readonly class TenantSelfService
         ?TenantActivity $activity = null,
         ?AuditLog $audit = null,
         array $reservedSlugs = [],
+        ?Domains $routing = null,
         string $invitePath = '/invite',
         bool $localHttp = false,
     ) {
@@ -136,7 +143,7 @@ final readonly class TenantSelfService
             $this->invitations,
             $this->invitePolicy,
             $invites,
-            new SlugRules($reservedSlugs, $platformHosts, self::rootOf($realms->authority->host)),
+            $this->slugs = SlugRules::forPlatform($realms, $routing, $reservedSlugs),
             $this->roles,
             $this->activity,
         );
@@ -218,13 +225,5 @@ final readonly class TenantSelfService
         }
 
         return $container;
-    }
-
-    /** The domain the platform's own host is under: `example.com` for `app.example.com`, the host itself for two labels. */
-    private static function rootOf(string $host): string
-    {
-        $labels = explode('.', $host);
-
-        return \count($labels) > 2 ? implode('.', \array_slice($labels, 1)) : $host;
     }
 }

@@ -32,7 +32,7 @@ use Tinvar\Validation\ValidationException;
  *   no one climbs, so a permission nobody holds is never given again (an
  *   only owner stepping down to admin left no one able to rename the
  *   tenant or change its slug).
- * - **A slug** is held to SlugRules -- `admin`, `www`, the platform's own
+ * - **A slug** is held to SlugRules -- `admin`, `api`, `www`, every label of the platform's own
  *   hosts -- and to being nobody else's, by the store.
  *
  * Each refusal is a ValidationException under the field it is about, with

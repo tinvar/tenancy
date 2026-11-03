@@ -113,14 +113,10 @@ final readonly class TenantDomainClaims
             }
         }
 
-        $domain = $this->domains->add($tenant, $host);
-        // Counted after the insert, so two adds at once cannot both slip in
-        // under the bound: each counts the other's, and is taken back.
-        if ($this->domains->countForTenant($tenant) > $this->limit) {
-            $this->domains->remove($tenant, $domain->id);
-
-            throw self::refused("Your organization has {$this->limit} domains, the most it may have. Remove one to add another.");
-        }
+        // Counted under a lock a second add of the tenant's waits on: two at
+        // once cannot both count the other's uncommitted row as absent.
+        $domain = $this->domains->addWithin($tenant, $host, $this->limit)
+            ?? throw self::refused("Your organization has {$this->limit} domains, the most it may have. Remove one to add another.");
         $this->activity->record(TenantChange::DomainAdded, $tenant, $actor, ['host' => $host]);
 
         return $domain;

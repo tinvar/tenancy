@@ -12,6 +12,7 @@ use Tinvar\Auth\Memberships;
 use Tinvar\Auth\TenantMemberships;
 use Tinvar\Auth\UserLookup;
 use Tinvar\Orm\Connection;
+use Tinvar\Orm\NamesDriver;
 use Tinvar\Orm\Orm;
 use Tinvar\Orm\Schema\Schema;
 use Tinvar\Orm\Schema\Table;
@@ -137,6 +138,30 @@ final readonly class DatabaseTenantMembers implements TenantMembers, Memberships
     public function remove(string $tenant, string $panel, string $userId): void
     {
         $this->as($tenant, fn (): int => $this->connection->execute("DELETE FROM {$this->table} WHERE tenant_id = ? AND panel = ? AND user_id = ?", [$tenant, $panel, $userId]));
+    }
+
+    /**
+     * Postgres and MySQL: a locking read of the tenant's members of the
+     * panel, in key order, whose row locks a second change's read waits on
+     * until the first commits -- and then reads the members as the first
+     * left them. SQLite: the transaction's write lock, begun IMMEDIATE
+     * (PdoConnection::sqlite()), holds the whole database from its start.
+     *
+     * A member added meanwhile, by an invite accepted, is not held: it only
+     * adds a role, and no check here is made false by one more holder.
+     */
+    public function locked(string $tenant, string $panel, \Closure $work): mixed
+    {
+        return $this->as($tenant, fn (): mixed => $this->connection->transaction(function () use ($tenant, $panel, $work): mixed {
+            if (($this->connection instanceof NamesDriver ? $this->connection->driver() : 'sqlite') !== 'sqlite') {
+                $this->connection->select(
+                    "SELECT user_id FROM {$this->table} WHERE tenant_id = ? AND panel = ? ORDER BY user_id FOR UPDATE",
+                    [$tenant, $panel],
+                );
+            }
+
+            return $work();
+        }));
     }
 
     public function membership(Authenticatable $user, string $panel, string $tenant): ?Membership

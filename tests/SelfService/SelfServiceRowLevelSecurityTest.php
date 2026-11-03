@@ -122,3 +122,20 @@ it('still takes a domain out of service by its host, and reads another tenant\'s
             ->and($world->domains->ofTenant('acme', $domain->id)?->status->value)->toBe('deactivated');
     });
 })->group('pgsql')->skip(Databases::postgresMissing() !== null, Databases::postgresMissing() ?? '');
+
+it('holds the members while a change is checked, and counts the domains under a lock, under the policy', function () {
+    asApplicationRole(static function (AdminWorld $world): void {
+        expect($world->act('OrganizationSettings.changeRole', ['member' => 'm-3', 'role' => 'admin'])->status)->toBe(200)
+            ->and($world->members->roleOf('acme', 'customer', 'm-3'))->toBe('admin')
+            ->and($world->act('OrganizationSettings.removeMember', ['member' => 'm-3'])->status)->toBe(200)
+            ->and($world->members->roleOf('acme', 'customer', 'm-3'))->toBeNull()
+            // A last owner stepping down is still refused, with the members held.
+            ->and($world->act('OrganizationSettings.changeRole', ['member' => 'm-1', 'role' => 'admin'])->status)->toBe(422);
+
+        foreach (['a.acme.org', 'b.acme.org', 'c.acme.org'] as $host) {
+            expect($world->act('OrganizationDomains.add', ['host' => $host])->status)->toBe(200);
+        }
+        expect($world->act('OrganizationDomains.add', ['host' => 'd.acme.org'])->status)->toBe(422)
+            ->and($world->domains->countForTenant('acme'))->toBe(3);
+    });
+})->group('pgsql')->skip(Databases::postgresMissing() !== null, Databases::postgresMissing() ?? '');

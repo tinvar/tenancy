@@ -30,4 +30,18 @@ interface TenantMembers
     public function changeRole(string $tenant, string $panel, string $userId, string $role): void;
 
     public function remove(string $tenant, string $panel, string $userId): void;
+
+    /**
+     * Runs $work in a transaction holding the tenant's members of $panel
+     * against any other change -- a role changed, a member removed -- until
+     * the outermost transaction commits: what TenantSettings checks a change
+     * under, so two changes at once cannot each pass a check the other
+     * makes false (two owners stepping each other down). A store that cannot
+     * hold them throws rather than run $work unheld.
+     *
+     * @template T
+     * @param \Closure(): T $work
+     * @return T
+     */
+    public function locked(string $tenant, string $panel, \Closure $work): mixed;
 }

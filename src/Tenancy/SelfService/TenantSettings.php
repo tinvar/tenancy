@@ -26,7 +26,9 @@ use Tinvar\Validation\ValidationException;
  *   or remove only a member whose role grants nothing theirs does not.
  * - **No tenant is locked out.** A change or a removal that would leave no
  *   member holding a permission some member held before -- to manage
- *   members, settings or domains -- is refused, the member's own included:
+ *   members, settings or domains -- is refused, the member's own included,
+ *   checked with the members held (TenantMembers::locked()) so two changes
+ *   at once cannot each pass a check the other makes false:
  *   no one climbs, so a permission nobody holds is never given again (an
  *   only owner stepping down to admin left no one able to rename the
  *   tenant or change its slug).
@@ -153,6 +155,11 @@ final readonly class TenantSettings
     /** @throws ValidationException under `role`; HttpException 404 for no member of this tenant */
     public function changeRole(string $tenant, string $panel, string $userId, string $role, Authenticatable $actor): void
     {
+        $this->members->locked($tenant, $panel, fn () => $this->changeRoleHeld($tenant, $panel, $userId, $role, $actor));
+    }
+
+    private function changeRoleHeld(string $tenant, string $panel, string $userId, string $role, Authenticatable $actor): void
+    {
         $current = $this->members->roleOf($tenant, $panel, $userId) ?? throw self::notFound('member');
         if ($this->roles->of($role) === null) {
             throw new ValidationException(['role' => ['Choose one of the roles listed.']]);
@@ -169,6 +176,11 @@ final readonly class TenantSettings
 
     /** @throws ValidationException under `member`; HttpException 404 for no member of this tenant */
     public function removeMember(string $tenant, string $panel, string $userId, Authenticatable $actor): void
+    {
+        $this->members->locked($tenant, $panel, fn () => $this->removeMemberHeld($tenant, $panel, $userId, $actor));
+    }
+
+    private function removeMemberHeld(string $tenant, string $panel, string $userId, Authenticatable $actor): void
     {
         $current = $this->members->roleOf($tenant, $panel, $userId) ?? throw self::notFound('member');
         $this->assertOutranks($tenant, $panel, $actor, $current, null);

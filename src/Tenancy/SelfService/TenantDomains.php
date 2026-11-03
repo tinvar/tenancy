@@ -9,6 +9,7 @@ use Tinvar\Identity\CustomDomain;
 use Tinvar\Identity\CustomDomains;
 use Tinvar\Identity\Realm;
 use Tinvar\Orm\Connection;
+use Tinvar\Orm\NamesDriver;
 use Tinvar\Orm\Orm;
 use Tinvar\Orm\Schema\Schema;
 use Tinvar\Orm\Schema\Table;
@@ -133,6 +134,41 @@ final readonly class TenantDomains implements CustomDomains
         $rows = $this->as($tenant, fn (): array => $this->connection->select("SELECT COUNT(*) AS n FROM {$this->table} WHERE tenant_id = ?", [$tenant]));
 
         return (int) ($rows[0]['n'] ?? 0);
+    }
+
+    /**
+     * A pending claim of $host for $tenant, as add(), when the tenant has
+     * fewer than $limit domains; null when it has that many already.
+     *
+     * The count and the insert in one transaction, under a lock on the
+     * tenant's domains that a second add of the tenant's waits on until the
+     * first commits -- so two at once cannot both count the other's
+     * uncommitted row as absent and both slip under the limit:
+     *
+     *  - Postgres: a transaction-scoped advisory lock on the tenant, held to
+     *    the outermost commit; READ COMMITTED's row locks cannot hold rows
+     *    not yet written.
+     *  - MySQL: a locking read of the tenant's rows, whose next-key locks
+     *    hold off another insert of the tenant's to the commit; two at once
+     *    may deadlock instead, and the one MySQL rolls back is refused.
+     *  - SQLite: the transaction's write lock, begun IMMEDIATE
+     *    (PdoConnection::sqlite()), holds the whole database from before the
+     *    count; on a connection begun DEFERRED the second writer's insert
+     *    fails rather than overtake the first's count.
+     *
+     * A lock not had fails the add, by throwing, rather than count without it.
+     */
+    public function addWithin(string $tenant, string $host, int $limit): ?TenantDomain
+    {
+        return $this->as($tenant, fn (): ?TenantDomain => $this->connection->transaction(function () use ($tenant, $host, $limit): ?TenantDomain {
+            match ($this->connection instanceof NamesDriver ? $this->connection->driver() : 'sqlite') {
+                'pgsql' => $this->connection->select('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', ["tinvar-tenant-domains:{$this->table}:{$tenant}"]),
+                'mysql' => $this->connection->select("SELECT id FROM {$this->table} WHERE tenant_id = ? FOR UPDATE", [$tenant]),
+                default => [],
+            };
+
+            return $this->countForTenant($tenant) >= $limit ? null : $this->add($tenant, $host);
+        }));
     }
 
     /**

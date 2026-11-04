@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tinvar\Tenancy;
 
 use Tinvar\Http\HostName;
+use Tinvar\Http\HttpException;
 use Tinvar\Http\Request;
 use Tinvar\Http\TenantFromHost;
 use Tinvar\Routing\HostMatch;
@@ -61,8 +62,30 @@ final readonly class Host implements SubtreeSource, TenantFromHost
             return null;
         }
 
-        $tenant = $this->hosts->tenantForHost($host);
+        try {
+            $tenant = $this->hosts->tenantForHost($host);
+        } catch (TenantMoved $moved) {
+            throw self::redirect($request, $moved->host);
+        }
 
         return $tenant === '' ? null : $tenant;
+    }
+
+    /**
+     * A tenant that moved to another slug: a permanent redirect to the same
+     * path and query on its host now, by the scheme and port the request
+     * came in on. Protocol-relative, so it never names a scheme the request
+     * did not use; and the host is one label under the platform's own domain,
+     * built by Subdomains, never a header's.
+     */
+    private static function redirect(Request $request, string $host): HttpException
+    {
+        $port = parse_url('http://' . ($request->header('host') ?? ''), PHP_URL_PORT);
+        $query = $request->rawQuery ?? http_build_query($request->query);
+
+        return new HttpException(308, "This tenant is at {$host} now.", 'tenant_moved', [
+            'Location' => '//' . $host . (\is_int($port) ? ":{$port}" : '') . $request->path . ($query === '' ? '' : "?{$query}"),
+            'Cache-Control' => 'no-store',
+        ]);
     }
 }

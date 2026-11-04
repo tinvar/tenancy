@@ -160,8 +160,8 @@ final class TenantPagesKit implements AppKit
              * The tenant self-service pages' tables (ADR 0161), written by
              * `kit:install tinvar/tenancy`: the members and their roles, and the
              * custom domains. The tenants table `tinvar new` made gains the name
-             * and parent the settings page and the tenant tree read; an app
-             * without one gets the kit's.
+             * and parent the settings page and the tenant tree read, and a slug
+             * history beside it; an app without one gets the kit's.
              */
             return new class extends Migration {
                 public function up(Schema \$schema): void
@@ -171,6 +171,7 @@ final class TenantPagesKit implements AppKit
                             \$table->string('name', 100)->default('');
                             \$table->string('parent_id', 191)->nullable();
                         });
+                        DatabaseTenants::defineSlugs(\$schema);
                     } else {
                         DatabaseTenants::define(\$schema);
                     }
@@ -182,6 +183,7 @@ final class TenantPagesKit implements AppKit
                 {
                     \$schema->drop(TenantDomains::TABLE);
                     \$schema->drop(DatabaseTenantMembers::TABLE);
+                    \$schema->drop(DatabaseTenants::SLUGS_TABLE);
                 }
             };
 

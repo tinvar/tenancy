@@ -184,9 +184,9 @@ final readonly class TenantSelfService
     }
 
     /**
-     * The tables the kit's stores keep: the tenants, their members and their
-     * custom domains. An application with its own tenants or memberships
-     * makes only the rest.
+     * The tables the kit's stores keep: the tenants and their slug history,
+     * their members and their custom domains. An application with its own
+     * tenants or memberships makes only the rest.
      *
      * @param class-string<\Tinvar\Orm\Model> $userModel
      */
@@ -198,7 +198,7 @@ final readonly class TenantSelfService
     }
 
     /** The tables migrate() makes, last first, for a migration's down(). */
-    public const array TABLES = [TenantDomains::TABLE, DatabaseTenantMembers::TABLE, DatabaseTenants::TABLE];
+    public const array TABLES = [TenantDomains::TABLE, DatabaseTenantMembers::TABLE, DatabaseTenants::SLUGS_TABLE, DatabaseTenants::TABLE];
 
     /** What the pages, the policy, the invite job and the Kernel are built with. */
     public function register(Container $container): Container

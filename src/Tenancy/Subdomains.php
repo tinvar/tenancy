@@ -18,6 +18,13 @@ use Tinvar\Http\HostName;
  * The label goes to the application's lookup, which says which tenant it
  * is, if any: a label is a slug the application issued, and only the
  * application knows which slugs are live.
+ *
+ * A label no tenant holds may be one a tenant has moved from: given
+ * $movedFrom -- DatabaseTenants::movedFrom(), a slug left within its
+ * reservation -- the host is answered with TenantMoved, naming the same
+ * label's place under the same domain with the tenant's slug now, which
+ * Host turns into a permanent redirect. Old links keep working while the
+ * slug is reserved; after that the label is nobody's again.
  */
 final readonly class Subdomains implements TenantHosts
 {
@@ -27,8 +34,10 @@ final readonly class Subdomains implements TenantHosts
     /**
      * @param list<string> $domains the platform's domains, as `shop.test`
      * @param \Closure(string): ?string $tenantForLabel the tenant a label names, or null
+     * @param (\Closure(string): ?string)|null $movedFrom the slug a tenant that left a label is at
+     *        now, or null
      */
-    public function __construct(array $domains, private \Closure $tenantForLabel)
+    public function __construct(array $domains, private \Closure $tenantForLabel, private ?\Closure $movedFrom = null)
     {
         $normalized = [];
         foreach ($domains as $domain) {
@@ -68,6 +77,14 @@ final readonly class Subdomains implements TenantHosts
             }
 
             $tenant = ($this->tenantForLabel)($label);
+            if (($tenant === null || $tenant === '') && $this->movedFrom !== null) {
+                $now = ($this->movedFrom)($label);
+                // A label of its own: never a dotted name, so the move stays
+                // one label under the platform's own domain.
+                if (\is_string($now) && $now !== $label && preg_match('/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\z/', $now) === 1) {
+                    throw new TenantMoved("{$now}.{$domain}");
+                }
+            }
 
             return $tenant === '' ? null : $tenant;
         }

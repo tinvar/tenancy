@@ -132,9 +132,12 @@ final class Directory implements TenantHosts
     /** @var list<string> */
     public array $suspended = ['umbrella'];
 
+    /** @var (\Closure(string): ?string)|null the slug a tenant that left a label is at now */
+    public ?\Closure $movedFrom = null;
+
     public function tenantForHost(string $host): ?string
     {
-        $tenant = $this->custom[$host] ?? new Subdomains([ROOT], fn (string $label): ?string => $this->slugs[$label] ?? null)->tenantForHost($host);
+        $tenant = $this->custom[$host] ?? new Subdomains([ROOT], fn (string $label): ?string => $this->slugs[$label] ?? null, $this->movedFrom)->tenantForHost($host);
 
         return $tenant === null || \in_array($tenant, $this->suspended, true) ? null : $tenant;
     }

@@ -100,6 +100,63 @@ it('lets a tenant take back a slug it left', function (string $driver) {
     });
 })->with(['sqlite', 'pgsql', 'mysql']);
 
+it('holds only a tenant\'s last three former slugs, so renaming cannot squat on more', function (string $driver) {
+    if (($missing = missing($driver)) !== null) {
+        $this->markTestSkipped($missing);
+    }
+
+    onDriver($driver, static function (DatabaseTenants $tenants): void {
+        $tenants->create('Acme', 'acme', id: 'acme');
+        $tenants->create('Globex', 'globex', id: 'globex');
+        foreach (['acme-1', 'acme-2', 'acme-3', 'acme-4'] as $i => $slug) {
+            Clock::$now = Clock::$now->addMinutes($i + 1);
+            $tenants->changeSlug('acme', $slug);
+        }
+
+        // Left: acme, acme-1, acme-2, acme-3. Held: the last three alone.
+        expect($tenants->formerSlugs('acme'))->toBe(['acme-3', 'acme-2', 'acme-1'])
+            ->and($tenants->movedFrom('acme'))->toBeNull()
+            ->and(static fn () => $tenants->changeSlug('globex', 'acme-1'))->toThrow(SlugTaken::class);
+        $tenants->changeSlug('globex', 'acme');
+        expect($tenants->tenantForSlug('acme'))->toBe('globex');
+    });
+})->with(['sqlite', 'pgsql', 'mysql']);
+
+it('keeps as many former slugs as it is told to', function () {
+    Clock::$now = CarbonImmutable::parse('2026-11-03 12:00:00', 'UTC');
+    $connection = new PdoConnection(new \PDO('sqlite::memory:'), 'slug-history');
+    DatabaseTenants::define(new Schema($connection, Dialect::for($connection)));
+    $tenants = new DatabaseTenants($connection, clock: static fn (): CarbonImmutable => Clock::$now, keepFormerSlugs: 1);
+    $tenants->create('Acme', 'acme', id: 'acme');
+    $tenants->changeSlug('acme', 'acme-1');
+    Clock::$now = Clock::$now->addMinute();
+    $tenants->changeSlug('acme', 'acme-2');
+
+    expect($tenants->formerSlugs('acme'))->toBe(['acme-1'])
+        ->and(static fn () => new DatabaseTenants($connection, keepFormerSlugs: -1))->toThrow(\InvalidArgumentException::class);
+});
+
+it('lets the platform release a reserved slug, and never one in use', function (string $driver) {
+    if (($missing = missing($driver)) !== null) {
+        $this->markTestSkipped($missing);
+    }
+
+    onDriver($driver, static function (DatabaseTenants $tenants): void {
+        $tenants->create('Acme', 'acme', id: 'acme');
+        $tenants->create('Globex', 'globex', id: 'globex');
+        $tenants->changeSlug('acme', 'acme-co');
+
+        expect($tenants->releaseSlug('acme-co'))->toBeFalse()
+            ->and($tenants->releaseSlug('nobody'))->toBeFalse()
+            ->and($tenants->tenantForSlug('acme-co'))->toBe('acme')
+            ->and($tenants->releaseSlug('acme'))->toBeTrue()
+            ->and($tenants->movedFrom('acme'))->toBeNull()
+            ->and($tenants->formerSlugs('acme'))->toBe([]);
+        $tenants->changeSlug('globex', 'acme');
+        expect($tenants->tenantForSlug('acme'))->toBe('globex');
+    });
+})->with(['sqlite', 'pgsql', 'mysql']);
+
 it('reserves the slug of a tenant made before the history was kept, once it moves', function () {
     onDriver('sqlite', static function (DatabaseTenants $tenants): void {
         $tenants->create('Acme', 'acme', id: 'acme');

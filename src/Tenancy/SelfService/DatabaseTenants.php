@@ -34,6 +34,11 @@ use Tinvar\Tenancy\TenantTree;
  * still name it, and Subdomains sends them on to the tenant's new address
  * (movedFrom()). After that the slug is anyone's again. The tenant itself
  * may take it back at any time.
+ *
+ * A tenant holds its last KEEP_FORMER_SLUGS (3) former slugs and no more:
+ * a fourth left lets the oldest go at once, so renaming again and again
+ * squats on nothing beyond them. The platform's staff may let any former
+ * slug go sooner (releaseSlug()), never one a tenant goes by.
  */
 final readonly class DatabaseTenants implements TenantProfiles, TenantDirectory, TenantTree
 {
@@ -45,6 +50,9 @@ final readonly class DatabaseTenants implements TenantProfiles, TenantDirectory,
     /** How long a slug a tenant left stays reserved to it, and its old address sends visitors on. */
     public const int RESERVED_DAYS = 90;
 
+    /** How many former slugs one tenant holds at a time, unless told otherwise. */
+    public const int KEEP_FORMER_SLUGS = 3;
+
     private TimestampStorage $timestamps;
 
     private string $slugs;
@@ -54,9 +62,17 @@ final readonly class DatabaseTenants implements TenantProfiles, TenantDirectory,
 
     /**
      * @param (\Closure(): CarbonImmutable)|null $clock now; the system's, in UTC, unless given
+     * @param int $keepFormerSlugs how many former slugs one tenant holds at a time; 0 holds none
      */
-    public function __construct(private Connection $connection, private string $table = self::TABLE, ?\Closure $clock = null)
-    {
+    public function __construct(
+        private Connection $connection,
+        private string $table = self::TABLE,
+        ?\Closure $clock = null,
+        private int $keepFormerSlugs = self::KEEP_FORMER_SLUGS,
+    ) {
+        if ($keepFormerSlugs < 0) {
+            throw new \InvalidArgumentException('A tenant holds 0 or more former slugs.');
+        }
         if (preg_match('/^[a-z_][a-z0-9_]{0,50}\z/', $table) !== 1) {
             throw new \InvalidArgumentException("'{$table}' is not a table name the tenants will be kept in.");
         }
@@ -198,6 +214,38 @@ final readonly class DatabaseTenants implements TenantProfiles, TenantDirectory,
         if ($released === 0) {
             $this->connection->execute("INSERT INTO {$this->slugs} (slug, tenant_id, released_at) VALUES (?, ?, ?)", [$slug, $tenant, $now]);
         }
+
+        // The one just left, and the newest others up to the cap; the rest go.
+        $kept = $this->keepFormerSlugs === 0 ? [] : [$slug, ...\array_slice(array_values(array_diff($this->formerSlugs($tenant), [$slug])), 0, $this->keepFormerSlugs - 1)];
+        foreach (array_diff($this->formerSlugs($tenant), $kept) as $old) {
+            $this->connection->execute("DELETE FROM {$this->slugs} WHERE slug = ? AND tenant_id = ? AND released_at IS NOT NULL", [$old, $tenant]);
+        }
+    }
+
+    /**
+     * The former slugs the tenant still holds, the most recently left
+     * first: what staff tooling shows, and releaseSlug() lets go.
+     *
+     * @return list<string>
+     */
+    public function formerSlugs(string $tenant): array
+    {
+        $rows = $this->connection->select(
+            "SELECT slug FROM {$this->slugs} WHERE tenant_id = ? AND released_at IS NOT NULL AND released_at >= ? ORDER BY released_at DESC, slug",
+            [$tenant, $this->timestamps->format($this->cutoff())],
+        );
+
+        return array_map(static fn (array $row): string => (string) $row['slug'], $rows);
+    }
+
+    /**
+     * Lets a former slug go now, for the platform's staff: anyone may take
+     * it, and its old address sends nobody on. False for a slug no tenant
+     * holds as a former one -- a slug a tenant goes by is never let go here.
+     */
+    public function releaseSlug(string $slug): bool
+    {
+        return $this->connection->execute("DELETE FROM {$this->slugs} WHERE slug = ? AND released_at IS NOT NULL", [$slug]) > 0;
     }
 
     private function cutoff(): CarbonImmutable

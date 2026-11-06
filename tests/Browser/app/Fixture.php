@@ -192,6 +192,16 @@ final class People implements AccountUsers, UserLookup
 
     public function changePassword(AccountUser $user, string $passwordHash): void {}
 
+    public function changePasswordFrom(AccountUser $user, string $current, string $passwordHash): bool
+    {
+        return false;
+    }
+
+    public function storedPasswordHash(AccountUser $user): ?string
+    {
+        return $this->find($user->authIdentifier())?->accountPasswordHash();
+    }
+
     public function changeEmail(AccountUser $user, string $email): void {}
 
     public function passwordHashes(int $limit): array

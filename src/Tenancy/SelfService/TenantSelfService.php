@@ -98,7 +98,9 @@ final readonly class TenantSelfService
      * @param TenantActivity|null $activity where every change is recorded; the audit log's when
      *        $audit is given (AuditedTenantActivity), nowhere otherwise
      * @param AuditLog|null $audit the application's audit log (ADR 0156)
-     * @param bool $localHttp emailed links and addresses on http://localhost, in development
+     * @param bool $localHttp emailed links and addresses on http://localhost, in development: give
+     *        EmailLinks and CanonicalOrigins the same flag, so a one-host app whose platform origin
+     *        is http://app.localhost:PORT builds its invites there (ADR 0182)
      */
     public function __construct(
         Orm $orm,

@@ -30,4 +30,16 @@ final readonly class TenantLinks
 
         return $this->canonical->forTenant($tenant);
     }
+
+    /**
+     * Whether $tenant's links are built on a host of its own -- its
+     * subdomain, or a verified custom domain -- rather than the platform's
+     * origin, which every tenant without one shares. An invite to one is
+     * accepted there, on its own host, by the page that reads its tenant
+     * from that host; never on the shared one (ADR 0182).
+     */
+    public function hasOwnHost(string $tenant): bool
+    {
+        return $this->originFor($tenant) !== $this->canonical->platform;
+    }
 }

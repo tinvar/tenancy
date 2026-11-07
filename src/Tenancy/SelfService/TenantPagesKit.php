@@ -60,6 +60,7 @@ final class TenantPagesKit implements AppKit
             ...$steps,
             "Wire the services in app/Kernel.php: build a Tinvar\\Tenancy\\SelfService\\TenantSelfService and register() it in the container, and give the HTTP Kernel its memberships and a PanelRegistry with the 'customer' panel -- as the tenant self-service docs page (/docs/tenant-self-service) shows.",
             "{$app->console} migrate",
+            'Serving every tenant on one host, with no host per tenant? Declare the pages without Domain and TenantFrom -- the settings and domains pages in their panel, running as the session\'s tenant, and app/Http/Pages/Tenancy/OrganizationInvitation.php with #[Page] alone, so an invite\'s link names its own tenant -- and give TenantSelfService a TenantSwitcher with AccountTenantSessions, as the tenant self-service docs page shows.',
             'Set TINVAR_CUSTOM_DOMAIN_TARGETS to the host name tenants point their domains at before you deploy: production refuses to start without it.',
         ];
     }
@@ -72,26 +73,7 @@ final class TenantPagesKit implements AppKit
      */
     public static function classes(string $ns): array
     {
-        $page = static fn (string $class, string $base, string $attributes, string $doc, string $body = ''): string => <<<PHP
-            <?php
-
-            declare(strict_types=1);
-
-            namespace {$ns}\\Http\\Pages\\Tenancy;
-
-            use Tinvar\\Attributes\\Domain;
-            use Tinvar\\Attributes\\Page;
-            use Tinvar\\Attributes\\Panel;
-            use Tinvar\\Attributes\\TenantFrom;
-            use Tinvar\\Tenancy\\Host;
-            use Tinvar\\Tenancy\\SelfService\\Http\\{$base};
-
-            /** {$doc} */
-            {$attributes}
-            final class {$class} extends {$base}
-            {{$body}}
-
-            PHP;
+        $page = static fn (string $class, string $base, string $attributes, string $doc, string $body = ''): string => self::page($ns, $class, $base, $attributes, $doc, $body);
 
         return [
             'Http/Pages/Tenancy/Organizations.php' => $page(
@@ -116,7 +98,11 @@ final class TenantPagesKit implements AppKit
                 'OrganizationInvitation',
                 'AcceptInvitationPage',
                 "#[Page('/invite', view: 'tenancy/invitation', name: 'tenancy.invitation'), Domain('{tenant}.{root}'), TenantFrom(Host::class)]",
-                'Where an invite\'s emailed link lands: in no panel, since whoever opens it is no member yet (ADR 0161).',
+                'Where an invite\'s emailed link lands: in no panel, since whoever opens it is no member yet (ADR 0161).' . "\n *\n"
+                    . " * Serving every tenant on one host (ADR 0181)? Declare neither Domain nor TenantFrom: the link\n"
+                    . " * names its own tenant, and the page runs as that one, never the session's (ADR 0182):\n"
+                    . " *\n"
+                    . " *     #[Page('/invite', view: 'tenancy/invitation', name: 'tenancy.invitation')]\n",
             ),
             'Policies/Tenancy/TenantAdministrationRules.php' => <<<PHP
                 <?php
@@ -139,6 +125,33 @@ final class TenantPagesKit implements AppKit
 
                 PHP,
         ];
+    }
+
+    /** One page class's source, its doc a line or, given several, a block. */
+    private static function page(string $ns, string $class, string $base, string $attributes, string $doc, string $body): string
+    {
+        $doc = str_contains($doc, "\n") ? "/**\n * " . rtrim($doc, "\n") . "\n */" : "/** {$doc} */";
+
+        return <<<PHP
+            <?php
+
+            declare(strict_types=1);
+
+            namespace {$ns}\\Http\\Pages\\Tenancy;
+
+            use Tinvar\\Attributes\\Domain;
+            use Tinvar\\Attributes\\Page;
+            use Tinvar\\Attributes\\Panel;
+            use Tinvar\\Attributes\\TenantFrom;
+            use Tinvar\\Tenancy\\Host;
+            use Tinvar\\Tenancy\\SelfService\\Http\\{$base};
+
+            {$doc}
+            {$attributes}
+            final class {$class} extends {$base}
+            {{$body}}
+
+            PHP;
     }
 
     private static function migration(string $ns): string

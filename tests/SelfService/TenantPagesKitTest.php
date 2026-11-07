@@ -89,6 +89,20 @@ it('writes classes that load, and that discovery registers as pages and actions 
         ->and(Classifier::classify($policy))->toBe([['policies'], [\Tinvar\Tenancy\SelfService\TenantAdministration::class]]);
 });
 
+// The kit writes pages for a tenant per host; an application serving every
+// tenant on one host is told, in the class and the steps, what its invite
+// page declares instead (ADR 0182).
+it('says what the invitation page declares where every tenant is served on one host', function () {
+    $app = app();
+    $steps = implode("\n", new TenantPagesKit()->install($app));
+    $invitation = (string) file_get_contents("{$app->root}/app/Http/Pages/Tenancy/OrganizationInvitation.php");
+
+    expect($invitation)->toContain("#[Page('/invite', view: 'tenancy/invitation', name: 'tenancy.invitation'), Domain('{tenant}.{root}'), TenantFrom(Host::class)]")
+        ->and($invitation)->toContain('one host')
+        ->and($invitation)->toContain("#[Page('/invite', view: 'tenancy/invitation', name: 'tenancy.invitation')]\n")
+        ->and($steps)->toContain('one host')->toContain('OrganizationInvitation');
+});
+
 it('writes nothing over a file that is there, and nothing at all then', function () {
     $app = app();
     mkdir("{$app->root}/app/Http/Pages/Tenancy", 0o777, true);

@@ -12,7 +12,7 @@ use Tinvar\Generators\RouteTable;
 
 /**
  * The tenant self-service pages, written into an application once (ADR
- * 0161, ADR 0157): `bin/tinvar kit:install tinvar/tenancy`, or `tinvar new
+ * 0161, ADR 0157): `php tinvar kit:install tinvar/tenancy`, or `tinvar new
  * --tenancy=subdomain --kit=tinvar/tenancy`, which runs it.
  *
  * It writes the application's own classes -- one per page, each a few lines

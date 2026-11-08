@@ -38,7 +38,7 @@ function app(): KitTarget
     mkdir("{$root}/database/migrations", 0o777, true);
     file_put_contents("{$root}/resources/entries/rsc.tsx", TABLE);
 
-    return new KitTarget($root, 'KitApp' . bin2hex(random_bytes(3)), 'bin/tinvar', "{$root}/database/migrations");
+    return new KitTarget($root, 'KitApp' . bin2hex(random_bytes(3)), 'php tinvar', "{$root}/database/migrations");
 }
 
 it('is declared in the package\'s composer.json, as tinvar new finds kits', function () {
@@ -72,7 +72,7 @@ it('writes the pages, the policy, the views and the migration, and registers the
     $table = (string) file_get_contents("{$app->root}/resources/entries/rsc.tsx");
     expect($table)->toContain("'tenancy/domains': { Page: ")
         ->and($table)->toContain("from '../pages/tenancy/settings'")
-        ->and(implode("\n", $steps))->toContain('TenantSelfService')->toContain('bin/tinvar migrate')->toContain('ReverifyTenantDomains');
+        ->and(implode("\n", $steps))->toContain('TenantSelfService')->toContain('php tinvar migrate')->toContain('ReverifyTenantDomains');
 });
 
 it('writes classes that load, and that discovery registers as pages and actions with their policy', function () {

@@ -23,4 +23,7 @@ enum TenantPermission: string
 
     /** See, make, revoke and end the tenant's own API tokens (ADR 0193). */
     case ApiTokens = 'tenant.api-tokens';
+
+    /** See, make, change, test and resend the tenant's webhook subscriptions (ADR 0197). */
+    case Webhooks = 'tenant.webhooks';
 }

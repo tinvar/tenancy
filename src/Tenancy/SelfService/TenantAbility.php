@@ -40,6 +40,15 @@ enum TenantAbility: string
     /** Make, revoke, and end every one of, the tenant's API tokens (ADR 0193). */
     case ManageApiTokens = 'manageTenantApiTokens';
 
+    /** See the tenant's webhook subscriptions and each one's deliveries (ADR 0197). */
+    case ViewWebhooks = 'viewTenantWebhooks';
+
+    /** Make, change, pause, resume, delete and test the tenant's webhook subscriptions, and rotate their secrets (ADR 0197). */
+    case ManageWebhooks = 'manageTenantWebhooks';
+
+    /** Send one of a subscription's deliveries again, as a new delivery (ADR 0197). */
+    case ResendWebhooks = 'resendTenantWebhooks';
+
     /**
      * Open an invite's page and accept it: the emailed link is the
      * credential, and Invitations holds it to its own rules.

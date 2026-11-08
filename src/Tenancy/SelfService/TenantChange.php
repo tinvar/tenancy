@@ -25,4 +25,13 @@ enum TenantChange: string
     case ApiTokenCreated = 'tenant.api_token_created';
     case ApiTokenRevoked = 'tenant.api_token_revoked';
     case ApiTokensEnded = 'tenant.api_tokens_ended';
+    case WebhookCreated = 'tenant.webhook_created';
+    case WebhookUpdated = 'tenant.webhook_updated';
+    case WebhookPaused = 'tenant.webhook_paused';
+    case WebhookResumed = 'tenant.webhook_resumed';
+    case WebhookDeleted = 'tenant.webhook_deleted';
+    case WebhookSecretRotated = 'tenant.webhook_secret_rotated';
+    case WebhookTested = 'tenant.webhook_tested';
+    case WebhookResent = 'tenant.webhook_resent';
+    case WebhookDisabled = 'tenant.webhook_disabled';
 }

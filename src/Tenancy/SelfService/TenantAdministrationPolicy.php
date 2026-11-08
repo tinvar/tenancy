@@ -96,6 +96,49 @@ abstract class TenantAdministrationPolicy
     }
 
     /**
+     * The tenant's webhook subscriptions (ADR 0197): a membership carrying
+     * the permission webhooksPermission() names -- `tenant.webhooks` unless
+     * the application names its own. No token is asked here either.
+     *
+     * @param array<string, mixed> $arguments
+     */
+    public function viewTenantWebhooks(?Authenticatable $user, string $subject, array $arguments = []): bool
+    {
+        return $this->membership($user)?->can($this->webhooksPermission()) === true;
+    }
+
+    /** @param array<string, mixed> $arguments */
+    public function manageTenantWebhooks(?Authenticatable $user, string $subject, array $arguments = []): bool
+    {
+        return $this->membership($user)?->can($this->webhooksPermission()) === true;
+    }
+
+    /**
+     * Sending a delivery again: a membership carrying the permission
+     * webhookResendPermission() names -- the webhooks permission unless the
+     * application names another, for a support role that may resend and
+     * change nothing.
+     *
+     * @param array<string, mixed> $arguments
+     */
+    public function resendTenantWebhooks(?Authenticatable $user, string $subject, array $arguments = []): bool
+    {
+        return $this->membership($user)?->can($this->webhookResendPermission()) === true;
+    }
+
+    /** The permission that lets a member see and change the tenant's webhooks: override to name the application's own. */
+    protected function webhooksPermission(): string
+    {
+        return TenantPermission::Webhooks->value;
+    }
+
+    /** The permission that lets a member send a delivery again: override to name the application's own. */
+    protected function webhookResendPermission(): string
+    {
+        return $this->webhooksPermission();
+    }
+
+    /**
      * Anyone holding the link may see it; accepting it takes someone signed
      * in as the invited address's account, and Invitations checks the link
      * -- its tenant, its origin, its expiry, its single use, and the

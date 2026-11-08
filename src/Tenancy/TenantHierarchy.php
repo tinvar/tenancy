@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Tinvar\Tenancy;
 
+use Tinvar\Orm\PagedTenantSubtrees;
 use Tinvar\Orm\TenantBounds;
-use Tinvar\Orm\TenantSubtrees;
 
 /**
  * The application's TenantTree, read with limits: the whole of a subtree,
@@ -23,13 +23,17 @@ use Tinvar\Orm\TenantSubtrees;
  * reads it through TenantBounds, which holds its answers to the same limits
  * again, so they hold for any implementation of the port, this one or an
  * application's own (ADR 0056).
+ *
+ * It hands the Orm a subtree a page at a time too (ADR 0196): the tree's
+ * own pages where it is a PagedTenantTree, and otherwise its
+ * descendantsOf() read whole and paged here.
  */
-final readonly class TenantHierarchy implements TenantSubtrees
+final readonly class TenantHierarchy implements PagedTenantSubtrees
 {
     /** Levels walked up from a tenant before it is taken to be under nothing. */
     public const int MAX_DEPTH = TenantBounds::MAX_DEPTH;
 
-    /** Tenants in one subtree, root included, beyond which a read across it is refused. */
+    /** Tenants in one subtree, root included, beyond which a read across it at once is refused. */
     public const int MAX_SUBTREE = TenantBounds::MAX_SUBTREE;
 
     public function __construct(private TenantTree $tree) {}
@@ -98,5 +102,34 @@ final readonly class TenantHierarchy implements TenantSubtrees
         }
 
         return array_map('strval', array_keys($tenants));
+    }
+
+    /**
+     * The first $limit tenants below $root whose names sort after $after,
+     * in byte order: the tree's own page where it pages, and otherwise
+     * descendantsOf() read whole, sorted and cut here. The Orm holds the
+     * answer to the walk either way (TenantBounds::pages()).
+     *
+     * @return list<string>
+     */
+    public function descendantsAfter(string $root, ?string $after, int $limit): array
+    {
+        if ($limit < 1) {
+            throw new \InvalidArgumentException('A page of a subtree holds a tenant at least.');
+        }
+        if ($this->tree instanceof PagedTenantTree) {
+            return $this->tree->descendantsAfter($root, $after, $limit);
+        }
+
+        $below = [];
+        foreach ($this->tree->descendantsOf($root) as $descendant) {
+            if ($descendant !== '' && $descendant !== $root && ($after === null || strcmp($descendant, $after) > 0)) {
+                $below[$descendant] = true;
+            }
+        }
+        $below = array_map('strval', array_keys($below));
+        sort($below, \SORT_STRING);
+
+        return \array_slice($below, 0, $limit);
     }
 }

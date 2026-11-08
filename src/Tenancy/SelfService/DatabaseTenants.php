@@ -6,20 +6,23 @@ namespace Tinvar\Tenancy\SelfService;
 
 use Carbon\CarbonImmutable;
 use Tinvar\Orm\Connection;
+use Tinvar\Orm\NamesDriver;
 use Tinvar\Orm\Schema\Schema;
 use Tinvar\Orm\Schema\Table;
 use Tinvar\Orm\TimestampStorage;
 use Tinvar\Orm\UniqueViolation;
 use Tinvar\Support\Uuid;
+use Tinvar\Tenancy\PagedTenantTree;
 use Tinvar\Tenancy\TenantDirectory;
-use Tinvar\Tenancy\TenantTree;
 
 /**
  * The tenants, in a table of tinvar/tenancy's own (ADR 0161): an id, a
  * name, a slug -- its subdomain's label -- and a parent. A ready-made
  * TenantProfiles for the settings page, and the TenantDirectory and
  * TenantTree the rest of tenancy reads, from the one table, so they cannot
- * disagree. An application with its own tenants table implements those
+ * disagree -- paged as well (PagedTenantTree, ADR 0196): one recursive
+ * query per page, by the parent column, so a tenant moved by its parent_id
+ * is where the next page finds it, in the transaction that moved it. An application with its own tenants table implements those
  * over it instead, and never makes this one.
  *
  * The slug is unique by the database: two tenants taking one at once
@@ -40,7 +43,7 @@ use Tinvar\Tenancy\TenantTree;
  * squats on nothing beyond them. The platform's staff may let any former
  * slug go sooner (releaseSlug()), never one a tenant goes by.
  */
-final readonly class DatabaseTenants implements TenantProfiles, TenantDirectory, TenantTree
+final readonly class DatabaseTenants implements TenantProfiles, TenantDirectory, PagedTenantTree
 {
     public const string TABLE = 'tenants';
 
@@ -314,5 +317,32 @@ final readonly class DatabaseTenants implements TenantProfiles, TenantDirectory,
         );
 
         return array_values(array_filter(array_map(static fn (array $row): string => (string) $row['id'], $rows), static fn (string $id): bool => $id !== $tenant));
+    }
+
+    /**
+     * One recursive query per page: the subtree walked by parent_id, its
+     * ids compared and ordered byte by byte -- Postgres's "C" collation,
+     * MySQL's binary cast, SQLite's own -- whatever the table's collation,
+     * so a page goes on exactly after the last (ADR 0196).
+     */
+    public function descendantsAfter(string $tenant, ?string $after, int $limit): array
+    {
+        if ($limit < 1) {
+            throw new \InvalidArgumentException('A page of a subtree holds a tenant at least.');
+        }
+        [$bytes, $cursor] = match ($this->connection instanceof NamesDriver ? $this->connection->driver() : 'sqlite') {
+            'pgsql' => ['id COLLATE "C"', '?'],
+            'mysql' => ['CAST(id AS BINARY)', 'CAST(? AS BINARY)'],
+            default => ['id', '?'],
+        };
+        $rows = $this->connection->select(
+            "WITH RECURSIVE below(id) AS (SELECT id FROM {$this->table} WHERE parent_id = ? "
+            . "UNION SELECT t.id FROM {$this->table} t JOIN below b ON t.parent_id = b.id) "
+            . 'SELECT id FROM below WHERE id <> ?' . ($after === null ? '' : " AND {$bytes} > {$cursor}")
+            . " ORDER BY {$bytes} LIMIT " . $limit,
+            $after === null ? [$tenant, $tenant] : [$tenant, $tenant, $after],
+        );
+
+        return array_map(static fn (array $row): string => (string) $row['id'], $rows);
     }
 }

@@ -50,7 +50,11 @@ use Tinvar\Tenancy\SelfService\Requests\WebhookRequest;
 use Tinvar\Tenancy\SelfService\TenantAbility;
 use Tinvar\Tenancy\SelfService\TenantAdministration;
 use Tinvar\Tenancy\SelfService\TenantAdministrationPolicy;
+use Tinvar\Tenancy\SelfService\DatabaseTenantMembers;
 use Tinvar\Tenancy\SelfService\TenantMember;
+use Tinvar\Tenancy\SelfService\TenantRole;
+use Tinvar\Tenancy\SelfService\TenantRoles;
+use Tinvar\Http\ArrayThrottleStore;
 use Tinvar\Tenancy\SelfService\WebhookDisabledMails;
 use Tinvar\Validation\ValidationException;
 use Tinvar\Webhooks\ArrayDeliveryLog;
@@ -92,12 +96,42 @@ final class OrganizationWebhooks extends TenantWebhooksPage
     }
 }
 
-/** An application whose policy names a permission of its own for resending. */
-final class SupportResends extends TenantAdministrationPolicy
+/** An application's roles: an owner holding every webhooks permission, and support that may see and resend. */
+enum HelpdeskRole: string implements TenantRole
 {
+    case Owner = 'owner';
+    case Support = 'support';
+
+    public function permissions(): array
+    {
+        return match ($this) {
+            self::Owner => ['webhooks.view', 'webhooks.manage', 'webhooks.resend'],
+            self::Support => ['webhooks.view', 'webhooks.resend'],
+        };
+    }
+
+    public function label(): string
+    {
+        return ucfirst($this->value);
+    }
+}
+
+/** Its policy, naming a permission of its own for each of seeing, changing and resending. */
+final class HelpdeskRules extends TenantAdministrationPolicy
+{
+    protected function webhookViewPermission(): string
+    {
+        return 'webhooks.view';
+    }
+
+    protected function webhookManagePermission(): string
+    {
+        return 'webhooks.manage';
+    }
+
     protected function webhookResendPermission(): string
     {
-        return 'support.resend';
+        return 'webhooks.resend';
     }
 }
 
@@ -114,15 +148,16 @@ final class Page
     public readonly OutboundWebhooks $webhooks;
     public readonly OrganizationWebhooks $page;
     public readonly Gate $gate;
+    public readonly ArrayThrottleStore $throttles;
 
-    public function __construct()
+    public function __construct(?TenantAdministrationPolicy $rules = null, ?AdminWorld $world = null, ?PanelContext $panels = null)
     {
-        $this->world = new AdminWorld();
+        $this->world = $world ?? new AdminWorld();
         $orm = $this->world->orm;
         $connection = $orm->statements();
         DatabaseWebhookSubscriptions::define(new Schema($connection, Dialect::for($connection)));
         $this->auth = new AuthContext();
-        $this->panels = new PanelContext();
+        $this->panels = $panels ?? new PanelContext();
         $this->activity = new RecordedActivity();
         $this->queue = new ArrayQueue();
         $this->log = new ArrayDeliveryLog();
@@ -133,9 +168,10 @@ final class Page
             new WebhookUrlCheck(new OutboundPolicy(), new StaticResolver(['hooks.acme.example' => ['93.184.215.20'], 'intranet.acme.example' => ['10.1.2.3']])),
         );
         $this->webhooks = new OutboundWebhooks(new Dispatcher($this->queue, $orm, new Signer(KEY, 'jobs'), $this->auth, $this->panels), sent: $this->sent, orm: $orm);
-        $rules = new AdministrationRules($orm, $this->world->members, $this->panels);
-        $this->gate = new PolicyGate(new PolicyRegistry(static fn (string $class): object => $rules)->register(TenantAdministration::class, AdministrationRules::class), $this->auth);
-        $this->page = new OrganizationWebhooks($orm, $this->gate, $this->subscriptions, $this->webhooks, $this->log, $this->sent, $this->activity, $this->auth);
+        $rules ??= new AdministrationRules($orm, $this->world->members, $this->panels);
+        $this->gate = new PolicyGate(new PolicyRegistry(static fn (string $class): object => $rules)->register(TenantAdministration::class, $rules::class), $this->auth);
+        $this->throttles = new ArrayThrottleStore();
+        $this->page = new OrganizationWebhooks($orm, $this->gate, $this->subscriptions, $this->webhooks, $this->log, $this->sent, $this->activity, $this->auth, $this->throttles);
     }
 
     /**
@@ -152,6 +188,25 @@ final class Page
             fn (): mixed => $this->world->orm->actAs($tenant, fn (): mixed => $this->panels->within('customer', $work)),
             '1',
         );
+    }
+
+    /**
+     * Calls one of the page's methods as the action registry would: each
+     * #[Authorize] it carries, the class's and its own, asked first.
+     *
+     * @template T
+     * @param \Closure(): T $call
+     * @return T
+     */
+    public function authorized(string $method, \Closure $call): mixed
+    {
+        foreach (Authorize::declaredOn(OrganizationWebhooks::class, $method) as $check) {
+            if (!$this->gate->allows($check, [])) {
+                throw new HttpException(403, "{$method} is refused: {$check->ability}.", 'forbidden');
+            }
+        }
+
+        return $call();
     }
 
     public function may(string $member, TenantAbility $ability, ?Gate $gate = null): bool
@@ -261,12 +316,46 @@ it('finds none of acme\'s subscriptions from globex\'s page, and lets the owner 
         ->and($p->may('m-2', TenantAbility::ViewWebhooks))->toBeFalse()
         ->and($p->may('m-3', TenantAbility::ViewWebhooks))->toBeFalse()
         ->and($p->may('m-9', TenantAbility::ViewWebhooks))->toBeFalse();
+});
 
-    // A policy naming its own resend permission, which no default role holds.
-    $rules = new SupportResends($p->world->orm, $p->world->members, $p->panels);
-    $gate = new PolicyGate(new PolicyRegistry(static fn (string $class): object => $rules)->register(TenantAdministration::class, SupportResends::class), $p->auth);
-    expect($p->may('m-1', TenantAbility::ManageWebhooks, $gate))->toBeTrue()
-        ->and($p->may('m-1', TenantAbility::ResendWebhooks, $gate))->toBeFalse();
+it('lets a support role see and resend, and change nothing, where the application names a permission for each', function () {
+    $world = new AdminWorld();
+    $panels = new PanelContext();
+    $members = new DatabaseTenantMembers($world->orm, $world->people, new TenantRoles(HelpdeskRole::class), 'helpdesk_members');
+    $world->orm->statements()->execute('CREATE TABLE helpdesk_members (tenant_id VARCHAR(191) NOT NULL, user_id VARCHAR(191) NOT NULL, panel VARCHAR(64) NOT NULL, role VARCHAR(64) NOT NULL, created_at VARCHAR(40) NOT NULL, PRIMARY KEY (tenant_id, panel, user_id))');
+    $members->grant('acme', 'customer', 'm-1', 'owner');
+    $members->grant('acme', 'customer', 's-1', 'support');
+    $p = new Page(new HelpdeskRules($world->orm, $members, $panels), $world, $panels);
+
+    $made = $p->create();
+    [$delivery] = $p->as('m-1', fn () => $p->webhooks->publish(OrderEvent::Placed, ['number' => 'PW-1'], $p->subscriptions));
+
+    expect($p->view('s-1')->canManage)->toBeFalse()
+        ->and($p->view('s-1')->canResend)->toBeTrue()
+        ->and(fn () => $p->as('s-1', fn () => $p->authorized('pause', fn () => $p->page->pause(new WebhookRequest($made->subscription->id)))))->toThrow(HttpException::class)
+        ->and($p->as('s-1', fn () => $p->authorized('resend', fn () => $p->page->resend(new ResendWebhookRequest($made->subscription->id, $delivery))))->value['delivery'])->not->toBe($delivery)
+        ->and($p->may('m-1', TenantAbility::ManageWebhooks))->toBeTrue();
+});
+
+it('holds an organization to a few tests and resends a minute, apart from every other organization', function () {
+    $p = new Page();
+    $id = $p->create()->subscription->id;
+    for ($i = 0; $i < TenantWebhooksPage::TESTS_PER_MINUTE; $i++) {
+        $p->as('m-1', fn () => $p->page->test(new WebhookRequest($id)));
+    }
+
+    try {
+        $p->as('m-1', fn () => $p->page->test(new WebhookRequest($id)));
+        $this->fail('An eleventh test in a minute was sent.');
+    } catch (HttpException $e) {
+        expect($e->status)->toBe(429);
+    }
+    $globex = $p->as('m-9', fn () => $p->page->create(new CreateWebhookRequest('https://hooks.acme.example/g', ['order.placed'])), 'globex')->value;
+    \assert($globex instanceof IssuedWebhookSecretData);
+
+    expect($p->queue->pushed())->toHaveCount(TenantWebhooksPage::TESTS_PER_MINUTE)
+        ->and($p->as('m-9', fn () => $p->page->test(new WebhookRequest($globex->subscription->id)), 'globex')->value)->toHaveKey('delivery')
+        ->and(TenantWebhooksPage::RESENDS_PER_MINUTE)->toBe(30);
 });
 
 it('opens one subscription\'s deliveries, and sends one again as a new delivery -- never another subscription\'s', function () {

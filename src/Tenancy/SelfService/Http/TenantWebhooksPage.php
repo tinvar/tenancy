@@ -13,6 +13,7 @@ use Tinvar\Auth\AuthContext;
 use Tinvar\Auth\Gate;
 use Tinvar\Http\HttpException;
 use Tinvar\Http\Request;
+use Tinvar\Http\ThrottleStore;
 use Tinvar\Orm\Orm;
 use Tinvar\Tenancy\SelfService\Data\IssuedWebhookSecretData;
 use Tinvar\Tenancy\SelfService\Data\TenantWebhookData;
@@ -59,7 +60,11 @@ use Tinvar\Webhooks\WebhookSubscriptionRefused;
  * too, and a resend `resendTenantWebhooks`, each on its final action --
  * `<Class>.create`, `.update`, `.pause`, `.resume`, `.delete`, `.rotate`,
  * `.test`, `.resend` -- whose defaults ask for the `tenant.webhooks`
- * permission, an owner's, or the one the application's policy names. Each
+ * permission, an owner's, or the ones the application's policy names for
+ * each of seeing, changing and resending. Tests and resends each send a
+ * third party a delivery from the platform's addresses, so an organization
+ * may make TESTS_PER_MINUTE and RESENDS_PER_MINUTE of them, counted per
+ * organization in the application's ThrottleStore, and a 429 past that. Each
  * change is recorded with TenantActivity, the subscription by its id, its
  * URL's origin and its events: never its secret, nor the URL's path and
  * query, where a receiver may have put a credential of its own.
@@ -77,6 +82,12 @@ abstract class TenantWebhooksPage extends SelfServicePage
     /** The event a test sends, whatever the subscription chose. */
     public const string TEST_EVENT = 'webhook.test';
 
+    /** Test events one organization may send a minute. */
+    public const int TESTS_PER_MINUTE = 10;
+
+    /** Deliveries one organization may send again a minute. */
+    public const int RESENDS_PER_MINUTE = 30;
+
     public function __construct(
         Orm $orm,
         Gate $gate,
@@ -86,6 +97,7 @@ abstract class TenantWebhooksPage extends SelfServicePage
         protected readonly SentWebhooks $sent,
         protected readonly TenantActivity $activity,
         protected readonly AuthContext $auth,
+        protected readonly ThrottleStore $throttles,
     ) {
         parent::__construct($orm, $gate);
     }
@@ -213,6 +225,7 @@ abstract class TenantWebhooksPage extends SelfServicePage
         if (!$subscription->active()) {
             throw new HttpException(409, 'Resume the subscription before sending it a test event.', 'conflict');
         }
+        $this->spend('test', $tenant, self::TESTS_PER_MINUTE);
         $delivery = $this->webhooks->send($subscription->id, self::TEST_EVENT, [
             'subscription' => $subscription->id,
             'message' => 'A test event, sent from the webhooks page.',
@@ -239,6 +252,7 @@ abstract class TenantWebhooksPage extends SelfServicePage
         if (!$subscription->active()) {
             throw new HttpException(409, 'Resume the subscription before sending it a delivery again.', 'conflict');
         }
+        $this->spend('resend', $tenant, self::RESENDS_PER_MINUTE);
         $again = $this->webhooks->resend($sent->delivery, $this->actor())
             ?? throw new ValidationException(['delivery' => ['This delivery cannot be sent again: it was not kept.']]);
         $this->record(TenantChange::WebhookResent, $tenant, $subscription, ['delivery' => $sent->delivery, 'resend' => $again]);
@@ -292,6 +306,20 @@ abstract class TenantWebhooksPage extends SelfServicePage
         }
 
         return $chosen;
+    }
+
+    /**
+     * One of the organization's $what this minute, or a 429 once it has
+     * spent $perMinute: counted per organization, whoever in it asks.
+     */
+    private function spend(string $what, string $tenant, int $perMinute): void
+    {
+        [$hits, $resetsAt] = $this->throttles->increment("tenant-webhooks.{$what}:" . hash('sha256', $tenant), 60);
+        if ($hits > $perMinute) {
+            throw new HttpException(429, "Too many webhook {$what}s for this organization: try again in a minute.", 'too_many_requests', [
+                'retry-after' => (string) max(1, $resetsAt - time()),
+            ]);
+        }
     }
 
     /** One of the tenant's subscriptions, or a 404. */

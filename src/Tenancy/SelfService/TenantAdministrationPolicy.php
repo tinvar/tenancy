@@ -96,38 +96,42 @@ abstract class TenantAdministrationPolicy
     }
 
     /**
-     * The tenant's webhook subscriptions (ADR 0197): a membership carrying
-     * the permission webhooksPermission() names -- `tenant.webhooks` unless
-     * the application names its own. No token is asked here either.
+     * The tenant's webhook subscriptions (ADR 0197): seeing them and their
+     * deliveries, changing them, and sending a delivery again each need a
+     * membership carrying the permission its own hook names --
+     * webhookViewPermission(), webhookManagePermission(),
+     * webhookResendPermission() -- each `tenant.webhooks`, an owner's,
+     * unless the application names its own: a support role, say, holding
+     * the view and resend permissions and not the manage one. No token is
+     * asked here either.
      *
      * @param array<string, mixed> $arguments
      */
     public function viewTenantWebhooks(?Authenticatable $user, string $subject, array $arguments = []): bool
     {
-        return $this->membership($user)?->can($this->webhooksPermission()) === true;
+        return $this->membership($user)?->can($this->webhookViewPermission()) === true;
     }
 
     /** @param array<string, mixed> $arguments */
     public function manageTenantWebhooks(?Authenticatable $user, string $subject, array $arguments = []): bool
     {
-        return $this->membership($user)?->can($this->webhooksPermission()) === true;
+        return $this->membership($user)?->can($this->webhookManagePermission()) === true;
     }
 
-    /**
-     * Sending a delivery again: a membership carrying the permission
-     * webhookResendPermission() names -- the webhooks permission unless the
-     * application names another, for a support role that may resend and
-     * change nothing.
-     *
-     * @param array<string, mixed> $arguments
-     */
+    /** @param array<string, mixed> $arguments */
     public function resendTenantWebhooks(?Authenticatable $user, string $subject, array $arguments = []): bool
     {
         return $this->membership($user)?->can($this->webhookResendPermission()) === true;
     }
 
-    /** The permission that lets a member see and change the tenant's webhooks: override to name the application's own. */
-    protected function webhooksPermission(): string
+    /** The permission that lets a member see the tenant's webhooks and their deliveries: override to name the application's own. */
+    protected function webhookViewPermission(): string
+    {
+        return TenantPermission::Webhooks->value;
+    }
+
+    /** The permission that lets a member change the tenant's webhooks: override to name the application's own. */
+    protected function webhookManagePermission(): string
     {
         return TenantPermission::Webhooks->value;
     }
@@ -135,7 +139,7 @@ abstract class TenantAdministrationPolicy
     /** The permission that lets a member send a delivery again: override to name the application's own. */
     protected function webhookResendPermission(): string
     {
-        return $this->webhooksPermission();
+        return TenantPermission::Webhooks->value;
     }
 
     /**

@@ -62,6 +62,7 @@ final class TenantPagesKit implements AppKit
             "{$app->console} migrate",
             'Serving every tenant on one host, with no host per tenant? Declare the pages without Domain and TenantFrom -- the settings and domains pages in their panel, running as the session\'s tenant, and app/Http/Pages/Tenancy/OrganizationInvitation.php with #[Page] alone, so an invite\'s link names its own tenant -- and give TenantSelfService a TenantSwitcher with AccountTenantSessions, as the tenant self-service docs page shows.',
             'Set TINVAR_CUSTOM_DOMAIN_TARGETS to the host name tenants point their domains at before you deploy: production refuses to start without it.',
+            'List Tinvar\\Tenancy\\SelfService\\ReverifyTenantDomains among your scheduled tasks, so each custom domain is proved again daily and one whose ownership record is gone lapses (ADR 0198).',
         ];
     }
 

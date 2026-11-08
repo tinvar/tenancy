@@ -98,9 +98,39 @@ final readonly class TenantDomains implements CustomDomains
             $domains->timestamp('verified_at')->nullable();
             $domains->timestamp('failing_since')->nullable();
             $domains->timestamp('deactivated_at')->nullable();
+            self::reverificationColumns($domains);
             $domains->unique(['tenant_id', 'host'], "{$table}_tenant_host");
             $domains->index(['status', 'checked_at'], "{$table}_due");
+            $domains->index(['status', 'next_check_at'], "{$table}_next_check");
         }, $ifNotExists);
+    }
+
+    /**
+     * Adds the re-verification's columns (ADR 0198) to a table define()
+     * made before them, for an application's migration. Every domain in
+     * service is then due at the next run of ReverifyTenantDomains.
+     */
+    public static function defineReverification(Schema $schema, string $table = self::TABLE): void
+    {
+        if (preg_match('/^[a-z_][a-z0-9_]{0,62}\z/', $table) !== 1) {
+            throw new \InvalidArgumentException("'{$table}' is not a table name the custom domains will write.");
+        }
+
+        $schema->table($table, static function (Table $domains) use ($table): void {
+            self::reverificationColumns($domains);
+            $domains->index(['status', 'next_check_at'], "{$table}_next_check");
+        });
+    }
+
+    private static function reverificationColumns(Table $domains): void
+    {
+        // When the run of checks that found the ownership record missing
+        // began; when the schedule checks the domain next; and why it went
+        // out of service (DomainLapse), while it is out. A string, not an
+        // enum's CHECK, so a cause added later needs no change to the table.
+        $domains->timestamp('unproved_since')->nullable();
+        $domains->timestamp('next_check_at')->nullable();
+        $domains->string('lapse', 16)->nullable();
     }
 
     public function now(): CarbonImmutable
@@ -198,7 +228,7 @@ final readonly class TenantDomains implements CustomDomains
      * host. False when another tenant holds the host already -- the check
      * and the database's unique index both say so.
      */
-    public function activate(string $tenant, string $id, CarbonImmutable $at, string $reason): bool
+    public function activate(string $tenant, string $id, CarbonImmutable $at, string $reason, ?CarbonImmutable $next = null): bool
     {
         $domain = $this->ofTenant($tenant, $id);
         if ($domain === null) {
@@ -214,9 +244,9 @@ final readonly class TenantDomains implements CustomDomains
             // In a transaction of its own -- a savepoint inside the action's --
             // so a refusal by the index leaves the action's able to go on.
             return $this->as($domain->tenant, fn (): bool => $this->connection->transaction(fn (): bool => $this->connection->execute(
-                "UPDATE {$this->table} SET status = ?, held_host = host, reason = ?, checked_at = ?, verified_at = ?, failing_since = NULL, deactivated_at = NULL "
-                . 'WHERE tenant_id = ? AND id = ?',
-                [TenantDomainStatus::Verified->value, $reason, $when, $when, $domain->tenant, $id],
+                "UPDATE {$this->table} SET status = ?, held_host = host, reason = ?, checked_at = ?, verified_at = ?, failing_since = NULL, deactivated_at = NULL, "
+                . 'unproved_since = NULL, lapse = NULL, next_check_at = ? WHERE tenant_id = ? AND id = ?',
+                [TenantDomainStatus::Verified->value, $reason, $when, $when, $next === null ? null : $this->timestamps->format($next), $domain->tenant, $id],
             ) === 1));
         } catch (\PDOException) {
             // Another tenant's proof of the same host committed in between:
@@ -225,13 +255,134 @@ final readonly class TenantDomains implements CustomDomains
         }
     }
 
-    /** A check of a domain not in service found it not yet proved: why, and when. */
-    public function unproved(string $tenant, string $id, CarbonImmutable $at, string $reason): void
+    /**
+     * A check of a domain not in service found it not yet proved: why, and
+     * when; and, for a lapsed one the schedule still checks, when next.
+     */
+    public function unproved(string $tenant, string $id, CarbonImmutable $at, string $reason, ?CarbonImmutable $next = null): void
     {
         $this->as($tenant, fn (): int => $this->connection->execute(
-            "UPDATE {$this->table} SET checked_at = ?, reason = ? WHERE tenant_id = ? AND id = ? AND held_host IS NULL",
-            [$this->timestamps->format($at), $reason, $tenant, $id],
+            "UPDATE {$this->table} SET checked_at = ?, reason = ?, next_check_at = ? WHERE tenant_id = ? AND id = ? AND held_host IS NULL",
+            [$this->timestamps->format($at), $reason, $next === null ? null : $this->timestamps->format($next), $tenant, $id],
         ));
+    }
+
+    // The re-verification's (ADR 0198): read across tenants, written as the tenant.
+
+    /**
+     * The domain in service on $host, whoever's it is; null for a host
+     * nobody holds.
+     */
+    public function holding(string $host): ?TenantDomain
+    {
+        $rows = $this->orm->acrossTenants(fn (): array => $this->connection->select("SELECT * FROM {$this->table} WHERE held_host = ?", [$host]));
+
+        return $rows === [] ? null : $this->domain($rows[0]);
+    }
+
+    /**
+     * The domains the schedule checks that are due at $now: in service, or
+     * out of it and not yet released, with no check booked or one booked at
+     * or before $now -- the longest waiting first, at most $limit.
+     *
+     * @param int<1, max> $limit
+     * @return list<TenantDomain>
+     */
+    public function dueForCheck(CarbonImmutable $now, int $limit): array
+    {
+        $rows = $this->orm->acrossTenants(fn (): array => $this->connection->select(
+            "SELECT * FROM {$this->table} WHERE status IN (?, ?, ?) AND (next_check_at IS NULL OR next_check_at <= ?) "
+            . 'ORDER BY next_check_at IS NOT NULL, next_check_at, id LIMIT ' . max(1, $limit),
+            [TenantDomainStatus::Verified->value, TenantDomainStatus::Failing->value, TenantDomainStatus::Deactivated->value, $this->timestamps->format($now)],
+        ));
+
+        return array_map($this->domain(...), $rows);
+    }
+
+    /**
+     * Claims $domain's check for one run: books its next check at $until if
+     * it is still due at $now and in the status it was read in. False when
+     * another run or a change took it first, so it is not checked twice.
+     */
+    public function claimCheck(TenantDomain $domain, CarbonImmutable $now, CarbonImmutable $until): bool
+    {
+        return $this->as($domain->tenant, fn (): int => $this->connection->execute(
+            "UPDATE {$this->table} SET next_check_at = ? WHERE tenant_id = ? AND id = ? AND status = ? AND (next_check_at IS NULL OR next_check_at <= ?)",
+            [$this->timestamps->format($until), $domain->tenant, $domain->id, $domain->status->value, $this->timestamps->format($now)],
+        )) === 1;
+    }
+
+    /**
+     * A check of a domain in service that left it in service: Verified or
+     * Failing, with the runs of failures it is in. False when it is no
+     * longer in service -- removed, or lapsed by another check.
+     */
+    public function rechecked(
+        TenantDomain $domain,
+        CarbonImmutable $at,
+        CarbonImmutable $next,
+        TenantDomainStatus $status,
+        ?CarbonImmutable $failingSince,
+        ?CarbonImmutable $unprovedSince,
+        string $reason,
+    ): bool {
+        if (!$status->active()) {
+            throw new \LogicException('A domain rechecked into service is Verified or Failing.');
+        }
+        $format = fn (?CarbonImmutable $moment): ?string => $moment === null ? null : $this->timestamps->format($moment);
+
+        return $this->as($domain->tenant, fn (): int => $this->connection->execute(
+            "UPDATE {$this->table} SET status = ?, checked_at = ?, next_check_at = ?, failing_since = ?, unproved_since = ?, reason = ? "
+            . 'WHERE tenant_id = ? AND id = ? AND held_host IS NOT NULL',
+            [$status->value, $format($at), $format($next), $format($failingSince), $format($unprovedSince), $reason, $domain->tenant, $domain->id],
+        )) === 1;
+    }
+
+    /**
+     * Takes a domain out of service, from $at, because of $lapse:
+     * Deactivated and holding its host no longer, so from the next lookup
+     * it is nobody's. False when it was not in service.
+     */
+    public function lapse(TenantDomain $domain, CarbonImmutable $at, ?CarbonImmutable $next, DomainLapse $lapse, string $reason): bool
+    {
+        $when = $this->timestamps->format($at);
+
+        return $this->as($domain->tenant, fn (): int => $this->connection->execute(
+            "UPDATE {$this->table} SET status = ?, held_host = NULL, checked_at = ?, deactivated_at = ?, next_check_at = ?, failing_since = NULL, "
+            . 'unproved_since = NULL, lapse = ?, reason = ? WHERE tenant_id = ? AND id = ? AND held_host IS NOT NULL',
+            [TenantDomainStatus::Deactivated->value, $when, $when, $next === null ? null : $this->timestamps->format($next), $lapse->value, $reason, $domain->tenant, $domain->id],
+        )) === 1;
+    }
+
+    /**
+     * The out-of-service domains whose claims are due to be released: out
+     * of service since before $cutoff, the longest first, at most $limit.
+     *
+     * @param int<1, max> $limit
+     * @return list<TenantDomain>
+     */
+    public function releasable(CarbonImmutable $cutoff, int $limit): array
+    {
+        $rows = $this->orm->acrossTenants(fn (): array => $this->connection->select(
+            "SELECT * FROM {$this->table} WHERE status = ? AND held_host IS NULL AND deactivated_at < ? ORDER BY deactivated_at, id LIMIT " . max(1, $limit),
+            [TenantDomainStatus::Deactivated->value, $this->timestamps->format($cutoff)],
+        ));
+
+        return array_map($this->domain(...), $rows);
+    }
+
+    /**
+     * Releases a lapsed claim: Pending again, with a fresh token, so the
+     * record that proved it before proves nothing now, and the schedule no
+     * longer checks it. False when it was not out of service.
+     */
+    public function release(TenantDomain $domain, CarbonImmutable $at, string $reason): bool
+    {
+        return $this->as($domain->tenant, fn (): int => $this->connection->execute(
+            "UPDATE {$this->table} SET status = ?, token = ?, checked_at = ?, deactivated_at = NULL, next_check_at = NULL, failing_since = NULL, "
+            . 'unproved_since = NULL, lapse = NULL, reason = ? WHERE tenant_id = ? AND id = ? AND status = ? AND held_host IS NULL',
+            [TenantDomainStatus::Pending->value, bin2hex(random_bytes(16)), $this->timestamps->format($at), $reason, $domain->tenant, $domain->id, TenantDomainStatus::Deactivated->value],
+        )) === 1;
     }
 
     /** The tenant serving $host, or null: a pending, deactivated or unknown host is nobody's. */
@@ -318,9 +469,12 @@ final readonly class TenantDomains implements CustomDomains
 
     public function passed(string $host, \DateTimeImmutable $at): void
     {
+        // Where it points is all this check read: a run of missing
+        // ownership records (ADR 0198) goes on, and keeps it failing.
         $this->asHolderOf($host, fn (): int => $this->connection->execute(
-            "UPDATE {$this->table} SET status = ?, checked_at = ?, failing_since = NULL, reason = ? WHERE held_host = ?",
-            [TenantDomainStatus::Verified->value, $this->timestamps->format($at), 'It points at the platform.', $host],
+            "UPDATE {$this->table} SET status = CASE WHEN unproved_since IS NULL THEN ? ELSE ? END, checked_at = ?, failing_since = NULL, "
+            . 'reason = CASE WHEN unproved_since IS NULL THEN ? ELSE reason END WHERE held_host = ?',
+            [TenantDomainStatus::Verified->value, TenantDomainStatus::Failing->value, $this->timestamps->format($at), 'It points at the platform.', $host],
         ));
     }
 
@@ -341,8 +495,8 @@ final readonly class TenantDomains implements CustomDomains
     public function deactivate(string $host, string $reason, \DateTimeImmutable $at): void
     {
         $this->asHolderOf($host, fn (): int => $this->connection->execute(
-            "UPDATE {$this->table} SET status = ?, held_host = NULL, checked_at = ?, deactivated_at = ?, reason = ? WHERE held_host = ?",
-            [TenantDomainStatus::Deactivated->value, $this->timestamps->format($at), $this->timestamps->format($at), $reason, $host],
+            "UPDATE {$this->table} SET status = ?, held_host = NULL, checked_at = ?, deactivated_at = ?, unproved_since = NULL, lapse = ?, reason = ? WHERE held_host = ?",
+            [TenantDomainStatus::Deactivated->value, $this->timestamps->format($at), $this->timestamps->format($at), DomainLapse::Pointing->value, $reason, $host],
         ));
     }
 
@@ -392,6 +546,9 @@ final readonly class TenantDomains implements CustomDomains
             verifiedAt: $at($row['verified_at'] ?? null),
             failingSince: $at($row['failing_since'] ?? null),
             deactivatedAt: $at($row['deactivated_at'] ?? null),
+            unprovedSince: $at($row['unproved_since'] ?? null),
+            nextCheckAt: $at($row['next_check_at'] ?? null),
+            lapse: \is_string($row['lapse'] ?? null) ? DomainLapse::tryFrom($row['lapse']) : null,
         );
     }
 

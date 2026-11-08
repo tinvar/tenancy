@@ -25,6 +25,12 @@ use Tinvar\Support\DevMode;
  *   domain at or under; the application's primary host's unless set;
  * - `GRACE`: seconds a domain whose DNS cannot be read stays in service --
  *   three days unless set;
+ * - `PROOF_GRACE`: seconds a domain whose ownership record is missing stays
+ *   in service, failing, before it lapses -- seven days unless set (ADR 0198);
+ * - `INTERVAL`: seconds between two scheduled checks of a domain -- a day
+ *   unless set, a minute at least;
+ * - `RELEASE`: seconds a lapsed claim waits to be proved again before it is
+ *   released -- thirty days unless set;
  * - `LIMIT`: the most domains one tenant may have, five unless set.
  *
  * With neither targets nor addresses, nothing a tenant adds could ever
@@ -57,6 +63,9 @@ final readonly class CustomDomainsConfig
         public array $platform = [],
         public int $grace = self::DEFAULT_GRACE,
         public int $limit = TenantDomainClaims::DEFAULT_LIMIT,
+        public int $proofGrace = TenantDomainReverification::DEFAULT_PROOF_GRACE,
+        public int $interval = TenantDomainReverification::DEFAULT_INTERVAL,
+        public int $release = TenantDomainReverification::DEFAULT_RELEASE,
     ) {
         $problems = [];
         foreach ($targets as $target) {
@@ -78,6 +87,15 @@ final readonly class CustomDomainsConfig
         }
         if ($grace < 0) {
             $problems[] = 'TINVAR_CUSTOM_DOMAIN_GRACE must be zero seconds or more.';
+        }
+        if ($proofGrace < 0) {
+            $problems[] = 'TINVAR_CUSTOM_DOMAIN_PROOF_GRACE must be zero seconds or more.';
+        }
+        if ($interval < 60) {
+            $problems[] = 'TINVAR_CUSTOM_DOMAIN_INTERVAL must be 60 seconds or more.';
+        }
+        if ($release < 0) {
+            $problems[] = 'TINVAR_CUSTOM_DOMAIN_RELEASE must be zero seconds or more.';
         }
         if ($limit < 1) {
             $problems[] = 'TINVAR_CUSTOM_DOMAIN_LIMIT must be at least 1.';

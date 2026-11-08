@@ -20,7 +20,9 @@ use Tinvar\Identity\DomainVerifier;
 use Tinvar\Identity\EmailLinks;
 use Tinvar\Identity\Invitations;
 use Tinvar\Identity\InvitePolicy;
+use Tinvar\Events\Events;
 use Tinvar\Identity\Realms;
+use Tinvar\Identity\RememberedConsents;
 use Tinvar\Identity\SystemDnsResolver;
 use Tinvar\Identity\TlsAskEndpoint;
 use Tinvar\Jobs\Dispatcher;
@@ -50,10 +52,11 @@ use Tinvar\Tenancy\TenantSwitching;
  * policy for TenantAdministration. `TenantPagesScaffold` writes them.
  *
  * Given its custom domains, the kit builds their checks -- the DNS check,
- * the ownership check, the re-verification with its grace -- from
- * CustomDomainsConfig, and Caddy's TLS `ask` endpoint, which it registers
- * in the container: the Kernel mounts the one it finds there, so a
- * certificate is asked about the moment custom domains are on. Without
+ * the ownership check, the re-verification with its graces and schedule
+ * (TenantDomainReverification, run by ReverifyTenantDomains, ADR 0198) --
+ * from CustomDomainsConfig, and Caddy's TLS `ask` endpoint, which it
+ * registers in the container: the Kernel mounts the one it finds there, so
+ * a certificate is asked about the moment custom domains are on. Without
  * them, there is no domains page, and nothing answers /_tls/ask.
  */
 final readonly class TenantSelfService
@@ -71,6 +74,9 @@ final readonly class TenantSelfService
     public ?TenantDomainClaims $claims;
 
     public ?CustomDomainVerification $verification;
+
+    /** The custom domains proved again on the schedule (ADR 0198); null without custom domains. */
+    public ?TenantDomainReverification $reverification;
 
     public ?TlsAskEndpoint $tlsAsk;
 
@@ -107,6 +113,10 @@ final readonly class TenantSelfService
      * @param bool $localHttp emailed links and addresses on http://localhost, in development: give
      *        EmailLinks and CanonicalOrigins the same flag, so a one-host app whose platform origin
      *        is http://app.localhost:PORT builds its invites there (ADR 0182)
+     * @param Events|null $events where a custom domain's change of state is dispatched, as
+     *        TenantDomainChanged, for the application to tell the tenant's admins (ADR 0198)
+     * @param RememberedConsents|null $remembered the handoff's remembered consents: a domain that
+     *        lapses is forgotten there for everyone (ADR 0198)
      */
     public function __construct(
         Orm $orm,
@@ -134,6 +144,8 @@ final readonly class TenantSelfService
         ?Domains $routing = null,
         string $invitePath = '/invite',
         bool $localHttp = false,
+        ?Events $events = null,
+        ?RememberedConsents $remembered = null,
     ) {
         $this->memberships = $memberships;
         $this->users = $users;
@@ -161,6 +173,7 @@ final readonly class TenantSelfService
         if ($domains === null) {
             $this->claims = null;
             $this->verification = null;
+            $this->reverification = null;
             $this->tlsAsk = null;
 
             return;
@@ -177,12 +190,28 @@ final readonly class TenantSelfService
             throw new \InvalidArgumentException('A tenant proves a custom domain with a TXT record: give a DnsResolver that is a DnsTextResolver too, as SystemDnsResolver is.');
         }
         $verifier = new DomainVerifier($config->targets, $config->addresses, $dns);
-        $this->verification = new CustomDomainVerification($domains, $verifier, $config->grace, $domains->now(...));
-        $this->claims = new TenantDomainClaims(
+        $this->reverification = new TenantDomainReverification(
+            $orm,
             $domains,
             $verifier,
             new DomainOwnership($dns),
-            $this->verification,
+            $config->grace,
+            $config->proofGrace,
+            $config->interval,
+            $config->release,
+            $this->activity,
+            $events,
+            $remembered,
+            $realms,
+            $auth,
+        );
+        // The framework's check of where a domain points -- Caddy's ask, and
+        // VerifyCustomDomains where it is still listed -- writes through the
+        // re-verification, so its changes are recorded and announced too.
+        $this->verification = new CustomDomainVerification($this->reverification, $verifier, $config->grace, $domains->now(...));
+        $this->claims = new TenantDomainClaims(
+            $domains,
+            $this->reverification,
             $config->targets,
             $config->addresses,
             $config->platform === [] ? $platformHosts : $config->platform,
@@ -190,7 +219,7 @@ final readonly class TenantSelfService
             $config->limit,
             $this->activity,
         );
-        $this->tlsAsk = new TlsAskEndpoint($realms, $domains, $this->verification, $throttles, $probeAccess ?? new ProbeAccess());
+        $this->tlsAsk = new TlsAskEndpoint($realms, $this->reverification, $this->verification, $throttles, $probeAccess ?? new ProbeAccess());
     }
 
     /**
@@ -235,10 +264,12 @@ final readonly class TenantSelfService
             ->instance(TenantRoles::class, $this->roles)
             ->instance(TenantActivity::class, $this->activity);
 
-        if ($this->domains !== null && $this->claims !== null && $this->verification !== null && $this->tlsAsk !== null) {
+        if ($this->domains !== null && $this->claims !== null && $this->verification !== null && $this->reverification !== null && $this->tlsAsk !== null) {
             $container
                 ->instance(TenantDomains::class, $this->domains)
-                ->instance(CustomDomains::class, $this->domains)
+                ->instance(CustomDomains::class, $this->reverification)
+                // What ReverifyTenantDomains asks for.
+                ->instance(TenantDomainReverification::class, $this->reverification)
                 ->instance(TenantDomainClaims::class, $this->claims)
                 ->instance(CustomDomainVerification::class, $this->verification)
                 // The Kernel mounts the TLS ask it finds registered here.

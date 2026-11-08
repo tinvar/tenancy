@@ -208,7 +208,7 @@ test('the shipped self-service views add, check and remove a domain, rename, inv
         expect($records['TXT'][0])->toBe('_tinvar-challenge.shop.acme.test')
             ->and($records['TXT'][1])->toMatch('/^tinvar-domain=[A-Za-z0-9_-]{16,}$/')
             ->and($records['CNAME'][1])->toBe('domains.example.test');
-        expect($domains['checked'])->toBe(['status' => 'verified', 'badge' => true, 'records' => 0])
+        expect($domains['checked'])->toBe(['status' => 'verified', 'badge' => true, 'records' => 0, 'schedule' => true])
             ->and($domains['removed'])->toBe(['gone' => true, 'emptyBanner' => true])
             ->and($domains['sameDocument'])->toBeTrue('the forms submitted in place, hydrated');
 

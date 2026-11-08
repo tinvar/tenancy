@@ -10,7 +10,6 @@ use Tinvar\Attributes\Authorize;
 use Tinvar\Auth\AuthContext;
 use Tinvar\Auth\Gate;
 use Tinvar\Orm\Orm;
-use Tinvar\Tenancy\SelfService\Data\DnsRecordData;
 use Tinvar\Tenancy\SelfService\Data\TenantDomainData;
 use Tinvar\Tenancy\SelfService\Data\TenantDomainsPageData;
 use Tinvar\Tenancy\SelfService\Requests\AddDomainRequest;
@@ -23,7 +22,8 @@ use Tinvar\Tenancy\SelfService\TenantDomainClaims;
 /**
  * A tenant's custom domains, ready-made (ADR 0161): the page where a tenant
  * admin adds one, sees the DNS records to create for it and its status --
- * pending, verified, failing or deactivated -- checks it, and removes it.
+ * pending, verified, failing or deactivated, with the last check, the next,
+ * and when a failing one lapses (ADR 0198) -- checks it, and removes it.
  *
  *     #[Page('/settings/domains', view: 'tenancy/domains', name: 'tenancy.domains'),
  *       Domain('{tenant}.{root}'), TenantFrom(Host::class), Panel('customer')]
@@ -73,7 +73,11 @@ abstract class CustomDomainsPage extends SelfServicePage
         return $this->again(['domain' => $domain->id]);
     }
 
-    /** Checks a domain now: its ownership and DNS, or -- once in service -- its re-verification. */
+    /**
+     * Checks a domain now: its ownership record and its DNS, as the first
+     * proof did or the schedule does. Once a minute per domain; asked again
+     * sooner, it answers from the last check.
+     */
     #[Action(transaction: true), Authorize(TenantAbility::ManageDomains->value, TenantAdministration::class)]
     final public function check(DomainRequest $input): ActionResult
     {
@@ -93,6 +97,6 @@ abstract class CustomDomainsPage extends SelfServicePage
 
     private function data(TenantDomain $domain): TenantDomainData
     {
-        return TenantDomainData::of($domain, array_map(DnsRecordData::of(...), $this->claims->records($domain)));
+        return $this->claims->describe($domain);
     }
 }

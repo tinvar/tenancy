@@ -139,3 +139,29 @@ it('holds the members while a change is checked, and counts the domains under a 
             ->and($world->domains->countForTenant('acme'))->toBe(3);
     });
 })->group('pgsql')->skip(Databases::postgresMissing() !== null, Databases::postgresMissing() ?? '');
+
+it('re-verifies, lapses and hands over custom domains under the policy, with no tenant in force (ADR 0198)', function () {
+    asApplicationRole(static function (AdminWorld $world): void {
+        $world->act('OrganizationDomains.add', ['host' => 'shop.acme.org']);
+        $acme = $world->domains->forTenant('acme')[0];
+        $world->dns->prove('shop.acme.org', $acme->token);
+        $world->act('OrganizationDomains.check', ['domain' => $acme->id]);
+
+        // The schedule, as nobody: finds acme's domain across tenants and marks it failing.
+        $world->dns->texts = [];
+        AdminWorld::$now = AdminWorld::$now->addDay();
+        new \Tinvar\Tenancy\SelfService\ReverifyTenantDomains()($world->kit->reverification ?? throw new \LogicException('No custom domains.'));
+        $failing = $world->domains->ofTenant('acme', $acme->id)?->status;
+
+        // globex proves it while acme's record is gone, and acme's lapses as globex's request runs.
+        $world->act('OrganizationDomains.add', ['host' => 'shop.acme.org'], 'm-9', 'globex.example.test');
+        $globex = $world->domains->forTenant('globex')[0];
+        $world->dns->texts['_tinvar-challenge.shop.acme.org'] = ['tinvar-domain=' . $globex->token];
+        AdminWorld::$now = AdminWorld::$now->addMinutes(2);
+        $world->act('OrganizationDomains.check', ['domain' => $globex->id], 'm-9', 'globex.example.test');
+
+        expect($failing)->toBe(\Tinvar\Tenancy\SelfService\TenantDomainStatus::Failing)
+            ->and($world->domains->tenantForHost('shop.acme.org'))->toBe('globex')
+            ->and($world->domains->ofTenant('acme', $acme->id)?->lapse)->toBe(\Tinvar\Tenancy\SelfService\DomainLapse::Claimed);
+    });
+})->group('pgsql')->skip(Databases::postgresMissing() !== null, Databases::postgresMissing() ?? '');

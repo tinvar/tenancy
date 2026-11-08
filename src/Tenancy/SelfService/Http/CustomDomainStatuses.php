@@ -7,11 +7,9 @@ namespace Tinvar\Tenancy\SelfService\Http;
 use Tinvar\Attributes\Authorize;
 use Tinvar\Http\HttpException;
 use Tinvar\Orm\Orm;
-use Tinvar\Tenancy\SelfService\Data\DnsRecordData;
 use Tinvar\Tenancy\SelfService\Data\TenantDomainData;
 use Tinvar\Tenancy\SelfService\TenantAbility;
 use Tinvar\Tenancy\SelfService\TenantAdministration;
-use Tinvar\Tenancy\SelfService\TenantDomain;
 use Tinvar\Tenancy\SelfService\TenantDomainClaims;
 
 /**
@@ -42,7 +40,7 @@ abstract class CustomDomainStatuses
         }
 
         return array_map(
-            fn (TenantDomain $domain): TenantDomainData => TenantDomainData::of($domain, array_map(DnsRecordData::of(...), $this->claims->records($domain))),
+            $this->claims->describe(...),
             $this->claims->of($tenant),
         );
     }

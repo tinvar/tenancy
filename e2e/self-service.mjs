@@ -104,6 +104,8 @@ try {
       status: await card.getAttribute('data-status'),
       badge: await card.getByText('Verified', { exact: true }).isVisible(),
       records: await card.locator('tbody tr').count(),
+      // The schedule's next check, and the last (ADR 0198).
+      schedule: await card.getByText(/^Last checked .* UTC\. Next check .* UTC\./).isVisible(),
     };
 
     await card.getByRole('button', { name: 'Remove' }).click();

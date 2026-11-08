@@ -72,7 +72,7 @@ it('writes the pages, the policy, the views and the migration, and registers the
     $table = (string) file_get_contents("{$app->root}/resources/entries/rsc.tsx");
     expect($table)->toContain("'tenancy/domains': { Page: ")
         ->and($table)->toContain("from '../pages/tenancy/settings'")
-        ->and(implode("\n", $steps))->toContain('TenantSelfService')->toContain('bin/tinvar migrate');
+        ->and(implode("\n", $steps))->toContain('TenantSelfService')->toContain('bin/tinvar migrate')->toContain('ReverifyTenantDomains');
 });
 
 it('writes classes that load, and that discovery registers as pages and actions with their policy', function () {

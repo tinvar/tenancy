@@ -3,7 +3,12 @@ import { Badge, Banner, Card, Heading, Stack, Table, TBody, Td, Text, Th, THead,
 import { space } from '@meridian/ui/tokens.stylex';
 import { Title } from '@tinvar/react/head';
 import { ActionButton, AddDomainForm, WatchDomains } from '../../components/tenancy/TenancyForms';
-import type { TenantDomain, TenantDomainStatus, TenantDomainsPageData } from '../../components/tenancy/types';
+import type {
+  DomainLapse,
+  TenantDomain,
+  TenantDomainStatus,
+  TenantDomainsPageData,
+} from '../../components/tenancy/types';
 
 /** How each status reads, and the tone it is shown in. */
 const STATUS: Record<TenantDomainStatus, { label: string; tone: 'neutral' | 'good' | 'warn' | 'bad' }> = {
@@ -13,9 +18,23 @@ const STATUS: Record<TenantDomainStatus, { label: string; tone: 'neutral' | 'goo
   deactivated: { label: 'Deactivated', tone: 'bad' },
 };
 
+/** Why a deactivated domain went out of service (ADR 0198). */
+const LAPSE: Record<DomainLapse, string> = {
+  pointing: 'Its DNS stopped pointing here.',
+  ownership: 'Its ownership record was missing for too long.',
+  claimed: 'Another organization proved it owns this domain.',
+};
+
+/** A moment as the server sent it, in UTC to the minute: the same on the server and in the browser. */
+function when(iso: string | null): string | null {
+  return iso === null ? null : `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`;
+}
+
 /**
  * The organization's custom domains (ADR 0161): each one's status, what its
- * last check found, and the DNS records to create for it. While one is
+ * last check found, when the next is, and the DNS records to create for
+ * it. A domain in service is checked again every day, and one whose
+ * ownership record goes is failing, then lapses (ADR 0198). While one is
  * pending or failing, the page reloads itself to show what the checks find.
  */
 export default function Page({ data }: { data: TenantDomainsPageData }) {
@@ -90,6 +109,28 @@ function DomainCard({ domain, data }: { domain: TenantDomain; data: TenantDomain
           ) : undefined
         }
       >
+        <Stack gap="s1">
+          {domain.lapse !== null && <Text tone="secondary">{LAPSE[domain.lapse]}</Text>}
+          {domain.lapsesAt !== null && (
+            <Text tone="secondary">
+              {`Still served until ${when(domain.lapsesAt)}. Fix its records before then, or it stops being served.`}
+            </Text>
+          )}
+          {domain.releasesAt !== null && (
+            <Text tone="secondary">
+              {`Checked daily until ${when(domain.releasesAt)}; after that your claim on it is released.`}
+            </Text>
+          )}
+          <Text tone="secondary" size="sm">
+            {[
+              domain.checkedAt !== null ? `Last checked ${when(domain.checkedAt)}.` : 'Not checked yet.',
+              domain.nextCheckAt !== null ? `Next check ${when(domain.nextCheckAt)}.` : null,
+              domain.checkableAt !== null ? `Check now looks again after ${when(domain.checkableAt)}.` : null,
+            ]
+              .filter((part) => part !== null)
+              .join(' ')}
+          </Text>
+        </Stack>
         {domain.status !== 'verified' && (
           <div {...stylex.props(styles.records)}>
             <Table label={`DNS records for ${domain.host}`}>

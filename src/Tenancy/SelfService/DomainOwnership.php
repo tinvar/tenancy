@@ -16,8 +16,9 @@ use Tinvar\Identity\DnsTextResolver;
  * pointing at the platform, and whoever claimed it next would be served on
  * it, with its visitors' cookies and its certificate: the dangling-domain
  * takeover. So a domain goes into service only once a record only its
- * owner could publish names the token of this tenant's claim, and that is
- * asked anew whenever a deactivated domain is put back.
+ * owner could publish names the token of this tenant's claim; and once in
+ * service, the same record is asked for again on the schedule, since a name
+ * can lapse or change hands at any time after (ADR 0198).
  *
  * Bounded as DomainVerifier is: one lookup, given $timeout seconds.
  */
@@ -56,6 +57,20 @@ final readonly class DomainOwnership
      */
     public function unproved(string $host, string $token): ?string
     {
+        $check = $this->check($host, $token);
+
+        return $check->proof === OwnershipProof::Proved ? null : $check->reason;
+    }
+
+    /**
+     * What the record says of $token now: there, missing, or unreadable
+     * (ADR 0198). Missing is DNS's answer -- no such name, no TXT record
+     * there, or none carrying the token; unreadable is a lookup that did not
+     * complete, which DnsTextResolver throws for, and says nothing of who
+     * owns the name.
+     */
+    public function check(string $host, string $token): OwnershipCheck
+    {
         if (preg_match('/^[0-9a-f]{32}\z/', $token) !== 1) {
             throw new \LogicException('An ownership token is 32 hexadecimal characters.');
         }
@@ -63,15 +78,18 @@ final readonly class DomainOwnership
         try {
             $texts = $this->resolver->texts(self::name($host), $this->timeout);
         } catch (DnsLookupFailed $e) {
-            return 'The ownership record could not be looked up: ' . $e->getMessage();
+            return new OwnershipCheck(OwnershipProof::Unreadable, 'The ownership record could not be looked up: ' . $e->getMessage());
         }
 
         foreach ($texts as $text) {
             if (hash_equals(self::value($token), trim($text))) {
-                return null;
+                return new OwnershipCheck(OwnershipProof::Proved);
             }
         }
 
-        return 'The TXT record at ' . self::name($host) . ' is not there yet, or does not carry this domain\'s token.';
+        return new OwnershipCheck(
+            OwnershipProof::Missing,
+            'The TXT record at ' . self::name($host) . ' is not there yet, or does not carry this domain\'s token.',
+        );
     }
 }

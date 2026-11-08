@@ -15,6 +15,14 @@ final readonly class TenantDomain
      *        this claim's alone, so another tenant's claim to the host is proved by nothing
      *        this one published
      * @param string $reason what the last check found, in the platform's words; '' for none
+     * @param ?CarbonImmutable $failingSince when the unbroken run of checks that could not
+     *        read where it points began (CustomDomainVerification's grace)
+     * @param ?CarbonImmutable $unprovedSince when the unbroken run of checks that found its
+     *        ownership record missing began (ADR 0198); a lookup that failed neither starts
+     *        nor ends one
+     * @param ?CarbonImmutable $nextCheckAt when the schedule checks it next; null for a pending
+     *        or released claim, which it does not check, or one never booked, which is due
+     * @param ?DomainLapse $lapse why it went out of service, while Deactivated
      */
     public function __construct(
         public string $id,
@@ -28,6 +36,9 @@ final readonly class TenantDomain
         public ?CarbonImmutable $verifiedAt = null,
         public ?CarbonImmutable $failingSince = null,
         public ?CarbonImmutable $deactivatedAt = null,
+        public ?CarbonImmutable $unprovedSince = null,
+        public ?CarbonImmutable $nextCheckAt = null,
+        public ?DomainLapse $lapse = null,
     ) {}
 
     /** The record the framework's re-verification reads (CustomDomainVerification, TlsAskEndpoint). */

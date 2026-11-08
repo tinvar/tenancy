@@ -7,27 +7,26 @@ namespace Tinvar\Tenancy\SelfService;
 use Tinvar\Auth\Authenticatable;
 use Tinvar\Http\HostName;
 use Tinvar\Http\HttpException;
-use Tinvar\Identity\CustomDomainVerification;
-use Tinvar\Identity\DomainPointing;
-use Tinvar\Identity\DomainVerifier;
 use Tinvar\Identity\Realms;
+use Tinvar\Tenancy\SelfService\Data\DnsRecordData;
+use Tinvar\Tenancy\SelfService\Data\TenantDomainData;
 use Tinvar\Validation\ValidationException;
 
 /**
  * A tenant's custom domains, as its admins add, check and remove them on
- * the domains page (ADR 0161), over TenantDomains and the framework's
- * DomainVerifier and CustomDomainVerification.
+ * the domains page (ADR 0161), over TenantDomains and the
+ * TenantDomainReverification that proves them, first and again (ADR 0198).
  *
  * Adding a domain claims it, and serves nothing: it is pending, and the
  * page shows the two records to create -- a TXT record proving the domain
  * is the tenant's (DomainOwnership), and a CNAME (or A and AAAA records)
  * pointing it at the platform. A check of a pending domain asks both, and
  * puts it in service once both hold and no other tenant holds the host.
- * From then on it is the framework's re-verification that checks it --
- * daily, at every certificate Caddy asks for, and when the page is asked
- * to -- and deactivates it when its DNS points elsewhere, or cannot be
- * read for longer than the grace period. A deactivated domain is put back
- * by proving it again, as a pending one is.
+ * From then on the re-verification checks both again -- on the schedule,
+ * when the page is asked to, and where it points at every certificate
+ * Caddy asks for -- marks it failing while its record is missing, and
+ * lapses it past the grace, or at once when its DNS points elsewhere. A
+ * lapsed domain is put back by proving it again, as a pending one is.
  *
  * Refused, with a message for the field saying what to do:
  *
@@ -37,7 +36,8 @@ use Tinvar\Validation\ValidationException;
  *   a subdomain of the platform's, whose certificate and cookies are the
  *   platform's;
  * - **a host another tenant holds** -- in service -- said without naming
- *   whose;
+ *   whose, unless that tenant's ownership record is missing: then the
+ *   host may be claimed, and a proof takes it over (ADR 0198);
  * - one the tenant has already, and one past the tenant's bound.
  */
 final readonly class TenantDomainClaims
@@ -45,8 +45,12 @@ final readonly class TenantDomainClaims
     /** The most domains a tenant may have, unless the application says otherwise. */
     public const int DEFAULT_LIMIT = 5;
 
-    /** Seconds after a check during which the page's "check now" answers from it. */
-    public const int RECHECK_AFTER = 10;
+    /**
+     * Seconds after a check during which the page's "check now" answers
+     * from it, with no lookup: one check a minute per domain, whoever asks,
+     * on every worker -- the throttle is the check's own recorded time.
+     */
+    public const int RECHECK_AFTER = 60;
 
     /** @var list<string> */
     private array $platformDomains;
@@ -61,9 +65,7 @@ final readonly class TenantDomainClaims
      */
     public function __construct(
         private TenantDomains $domains,
-        private DomainVerifier $verifier,
-        private DomainOwnership $ownership,
-        private CustomDomainVerification $verification,
+        private TenantDomainReverification $reverification,
         private array $targets,
         private array $addresses,
         array $platformDomains,
@@ -123,43 +125,44 @@ final readonly class TenantDomainClaims
     }
 
     /**
-     * Checks one of the tenant's domains now, and records what was found: a
-     * pending or deactivated one against its ownership record and its DNS,
-     * one in service as the daily re-verification does.
+     * Checks one of the tenant's domains now -- the page's "check now" --
+     * and records what was found: a pending or lapsed one proved as it was
+     * first proved, one in service against its ownership record and its DNS
+     * as the schedule checks it (TenantDomainReverification).
      *
      * @throws HttpException 404 for a domain that is not the tenant's
      */
     public function check(string $tenant, string $id, ?Authenticatable $actor): TenantDomain
     {
         $domain = $this->domains->ofTenant($tenant, $id) ?? throw self::notFound();
-        $now = $this->domains->now();
 
         // A check is a few DNS lookups of up to seconds each: one asked for
-        // again at once is answered from the last.
-        if ($domain->checkedAt !== null && $now->getTimestamp() - $domain->checkedAt->getTimestamp() < self::RECHECK_AFTER) {
+        // again within the minute is answered from the last.
+        if ($this->checkableAt($domain)?->greaterThan($this->domains->now()) === true) {
             return $domain;
         }
 
-        if ($domain->status->active()) {
-            $this->verification->verify($domain->custom());
-
-            return $this->reread($tenant, $id);
-        }
-
-        $missing = $this->ownership->unproved($domain->host, $domain->token);
-        $pointing = $this->verifier->check($domain->host);
-        if ($missing === null && $pointing->pointing !== DomainPointing::Platform) {
-            $missing = "It does not point at the platform yet: {$pointing->reason}.";
-        }
-        if ($missing !== null) {
-            $this->domains->unproved($tenant, $id, $now, $missing);
-        } elseif ($this->heldElsewhere($tenant, $domain->host) || !$this->domains->activate($tenant, $id, $now, 'It is yours, and it points at the platform.')) {
-            $this->domains->unproved($tenant, $id, $now, 'Another organization uses this domain. If it is yours, contact support.');
-        } else {
-            $this->activity->record(TenantChange::DomainVerified, $tenant, $actor, ['host' => $domain->host]);
-        }
+        $this->reverification->check($domain, $actor);
 
         return $this->reread($tenant, $id);
+    }
+
+    /** When "check now" next looks the domain up rather than answering from its last check. */
+    public function checkableAt(TenantDomain $domain): ?\Carbon\CarbonImmutable
+    {
+        return $domain->checkedAt?->addSeconds(self::RECHECK_AFTER);
+    }
+
+    /** One domain as its page shows it: its state, its schedule and its records. */
+    public function describe(TenantDomain $domain): TenantDomainData
+    {
+        return TenantDomainData::of(
+            $domain,
+            array_map(DnsRecordData::of(...), $this->records($domain)),
+            lapsesAt: $this->reverification->lapsesAt($domain),
+            releasesAt: $this->reverification->releasesAt($domain),
+            checkableAt: $this->checkableAt($domain),
+        );
     }
 
     /**
@@ -230,23 +233,13 @@ final readonly class TenantDomainClaims
             throw self::refused("{$host} is one of the platform's own addresses. Enter a domain you own.");
         }
 
-        if ($this->heldElsewhere($tenant, $host)) {
+        // Held by another tenant: refused, unless its holder's ownership
+        // record is missing, when a proof by this tenant may take it over.
+        if ($this->reverification->heldElsewhere($tenant, $host) && !$this->reverification->contestable($tenant, $host)) {
             throw self::refused("{$host} is already in use. If it is yours, contact support.");
         }
 
         return $host;
-    }
-
-    /**
-     * Whether another tenant is served on $host: by this table, or by a
-     * custom-domain realm the application keeps beside it.
-     */
-    private function heldElsewhere(string $tenant, string $host): bool
-    {
-        $realm = $this->realms?->forHost($host);
-        $holder = $this->domains->tenantForHost($host) ?? ($realm !== null && $realm->isCustom() ? $realm->tenant : null);
-
-        return $holder !== null && $holder !== $tenant;
     }
 
     /** The domain as a check left it, read again. */

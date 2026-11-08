@@ -29,6 +29,9 @@ export interface DnsRecord {
   purpose: 'ownership' | 'pointing' | string;
 }
 
+/** Why a domain went out of service (ADR 0198). */
+export type DomainLapse = 'pointing' | 'ownership' | 'claimed';
+
 export interface TenantDomain {
   id: string;
   host: string;
@@ -36,6 +39,15 @@ export interface TenantDomain {
   reason: string;
   checkedAt: string | null;
   records: DnsRecord[];
+  /** When the schedule checks it next; null for a pending or released claim. */
+  nextCheckAt: string | null;
+  /** When "Check now" next looks it up, rather than answering from the last check. */
+  checkableAt: string | null;
+  /** While failing: the last moment it is served if nothing changes. */
+  lapsesAt: string | null;
+  /** While deactivated: the moment after which its claim is released. */
+  releasesAt: string | null;
+  lapse: DomainLapse | null;
 }
 
 export interface TenantDomainsPageData {

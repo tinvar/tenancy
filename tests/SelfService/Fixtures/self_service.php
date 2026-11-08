@@ -150,6 +150,9 @@ final class FakeDns implements DnsResolver, DnsTextResolver
     /** @var array<string, true> */
     public array $failing = [];
 
+    /** @var array<string, int> names that answer this many more lookups, then fail as $failing's do */
+    public array $failAfter = [];
+
     /** @var list<string> every name asked about */
     public array $asked = [];
 
@@ -186,6 +189,9 @@ final class FakeDns implements DnsResolver, DnsTextResolver
     private function ask(string $name): void
     {
         $this->asked[] = $name;
+        if (isset($this->failAfter[$name]) && $this->failAfter[$name]-- <= 0) {
+            $this->failing[$name] = true;
+        }
         if (isset($this->failing[$name])) {
             throw new DnsLookupFailed("The lookup of {$name} failed.");
         }
@@ -435,6 +441,8 @@ final class AdminWorld
     public readonly TenantDomains $domains;
     public readonly People $people;
     public readonly Orm $orm;
+    public readonly \Tinvar\Events\EventFake $events;
+    public readonly \Tinvar\Identity\ArrayRememberedConsents $remembered;
 
     /** @var CarbonImmutable now, as every clock here reads it */
     public static CarbonImmutable $now;
@@ -465,6 +473,8 @@ final class AdminWorld
         $auth = new AuthContext();
         $this->dns = new FakeDns();
         $this->activity = new RecordedActivity();
+        $this->events = new \Tinvar\Events\EventFake($this->orm);
+        $this->remembered = new \Tinvar\Identity\ArrayRememberedConsents();
         $this->invites = new SentInvites();
         $this->domains = new TenantDomains($this->orm, clock: static fn (): CarbonImmutable => self::$now);
         $directory = null;
@@ -507,6 +517,8 @@ final class AdminWorld
             dns: $this->dns,
             activity: $audited ? null : $this->activity,
             audit: $this->audit,
+            events: $this->events,
+            remembered: $this->remembered,
         );
         $this->invites->invitations = $this->kit->invitations;
         $this->invites->links = $this->kit->links;

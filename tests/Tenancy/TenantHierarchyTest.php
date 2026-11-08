@@ -101,7 +101,7 @@ it('refuses a subtree larger than a read can carry, rather than reading part of 
         range(1, TenantHierarchy::MAX_SUBTREE),
     ));
 
-    expect(fn () => $huge->subtree('root'))->toThrow(\LengthException::class, 'more than the 1000');
+    expect(fn () => $huge->subtree('root'))->toThrow(\LengthException::class, 'more than the 10000');
 });
 
 it('walks to the limits the Orm holds every tree to', function () {

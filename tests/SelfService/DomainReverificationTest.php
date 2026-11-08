@@ -107,15 +107,34 @@ describe('the scheduled task', function () {
         expect(\count($world->dns->asked))->toBe($asked);
     });
 
-    it('checks a domain from before the re-verification at the first run', function () {
+    it('checks a domain from before the re-verification at the first run, and gives one whose record is gone a notice first', function () {
         $world = new AdminWorld();
         $id = verified($world);
         $world->orm->statements()->execute('UPDATE tenant_domains SET next_check_at = NULL');
         $world->dns->texts = [];
 
         run($world);
+        $first = AdminWorld::$now;
+        $domain = at($world, 'acme', $id);
+        $page = $world->page('/settings/domains')['domains'][0];
+        $claimed = $world->act('OrganizationDomains.add', ['host' => 'shop.acme.com'], 'm-9', 'globex.example.test');
 
-        expect(at($world, 'acme', $id)->status)->toBe(TenantDomainStatus::Failing);
+        // Through the notice and the grace after it, still served.
+        AdminWorld::$now = $first->addDays(14)->addSeconds(WEEK);
+        run($world);
+        $served = $world->domains->tenantForHost('shop.acme.com');
+        AdminWorld::$now = $first->addDays(14)->addSeconds(WEEK + 1);
+        run($world);
+
+        expect($domain->status)->toBe(TenantDomainStatus::Failing)
+            ->and($domain->unprovedSince?->equalTo($first->addDays(14)))->toBeTrue()
+            ->and($domain->reason)->toContain('Keep')
+            ->and($page['lapsesAt'])->toBe($first->addDays(14)->addSeconds(WEEK)->toJSON())
+            ->and(announced($world))->toBe(['acme:shop.acme.com:verified>failing', 'acme:shop.acme.com:failing>deactivated'])
+            // Nobody may claim it during the notice.
+            ->and($claimed->status)->toBe(422)
+            ->and($served)->toBe('acme')
+            ->and($world->domains->tenantForHost('shop.acme.com'))->toBeNull();
     });
 });
 
@@ -152,7 +171,26 @@ describe('a domain whose record goes', function () {
         expect(at($world, 'acme', $id)->status)->toBe(TenantDomainStatus::Failing);
     });
 
-    it('does not count a lookup that failed: neither a first failure nor a step toward the lapse', function () {
+    it('does not count a lookup that failed toward the missing record\'s grace, nor end its run', function () {
+        $world = new AdminWorld();
+        $id = verified($world);
+        $world->dns->texts = [];
+        later('+1 day');
+        run($world);
+        $since = at($world, 'acme', $id)->unprovedSince;
+
+        $world->dns->failing['_tinvar-challenge.shop.acme.com'] = true;
+        later('+1 hour');
+        run($world);
+        $unread = at($world, 'acme', $id);
+
+        expect($since)->not->toBeNull()
+            ->and($unread->status)->toBe(TenantDomainStatus::Failing)
+            ->and($unread->unprovedSince?->equalTo($since))->toBeTrue()
+            ->and($unread->unreadableSince)->not->toBeNull();
+    });
+
+    it('fails a domain whose record cannot be read, on a clock of its own, and a readable answer ends it', function () {
         $world = new AdminWorld();
         $id = verified($world);
         $world->dns->failing['_tinvar-challenge.shop.acme.com'] = true;
@@ -160,24 +198,54 @@ describe('a domain whose record goes', function () {
         run($world);
         $unread = at($world, 'acme', $id);
 
-        // Missing once, then unreadable at every check past the grace: the
-        // lapse still counts from the first miss, and unreadable is not one.
         unset($world->dns->failing['_tinvar-challenge.shop.acme.com']);
+        later('+1 hour');
+        run($world);
+        $read = at($world, 'acme', $id);
+
+        expect($unread->status)->toBe(TenantDomainStatus::Failing)
+            ->and($unread->unprovedSince)->toBeNull()
+            ->and($unread->unreadableSince?->equalTo(AdminWorld::$now->subHour()))->toBeTrue()
+            ->and($unread->reason)->toContain('could not be read')
+            ->and($read->status)->toBe(TenantDomainStatus::Verified)
+            ->and($read->unreadableSince)->toBeNull();
+    });
+
+    it('lapses a domain whose record cannot be read past the grace, to the second: a new owner cannot keep it served by making its lookups fail', function () {
+        $world = new AdminWorld();
+        $id = verified($world);
+        // The name changes hands; its new owner leaves the CNAME here and
+        // delegates _tinvar-challenge to a nameserver that answers SERVFAIL.
         $world->dns->texts = [];
+        $world->dns->failing['_tinvar-challenge.shop.acme.com'] = true;
         later('+1 day');
         run($world);
-        $since = at($world, 'acme', $id)->unprovedSince;
-        $world->dns->failing['_tinvar-challenge.shop.acme.com'] = true;
-        later('+8 days');
-        run($world);
-        $still = at($world, 'acme', $id);
+        $first = AdminWorld::$now;
 
-        expect($unread->status)->toBe(TenantDomainStatus::Verified)
-            ->and($unread->unprovedSince)->toBeNull()
-            ->and($unread->reason)->toContain('could not be read')
-            ->and($since)->not->toBeNull()
-            ->and($still->status)->toBe(TenantDomainStatus::Failing)
-            ->and($still->unprovedSince?->equalTo($since))->toBeTrue();
+        AdminWorld::$now = $first->addSeconds(3600);
+        run($world);
+        $atGrace = at($world, 'acme', $id);
+        AdminWorld::$now = $first->addSeconds(3601);
+        run($world);
+
+        expect($atGrace->status)->toBe(TenantDomainStatus::Failing)
+            ->and(at($world, 'acme', $id)->status)->toBe(TenantDomainStatus::Deactivated)
+            ->and(at($world, 'acme', $id)->lapse)->toBe(DomainLapse::Ownership)
+            ->and(at($world, 'acme', $id)->reason)->toContain('could not be read')
+            ->and($world->domains->tenantForHost('shop.acme.com'))->toBeNull();
+    });
+
+    it('never stays served through months of failed lookups', function () {
+        $world = new AdminWorld();
+        verified($world);
+        $world->dns->texts = [];
+        $world->dns->failing['_tinvar-challenge.shop.acme.com'] = true;
+        for ($i = 0; $i < 120; $i++) {
+            later('+1 day');
+            run($world);
+        }
+
+        expect($world->domains->tenantForHost('shop.acme.com'))->toBeNull();
     });
 
     it('is restored by the next check that finds it again', function () {
@@ -330,6 +398,22 @@ describe('a lapsed domain', function () {
             ->and(announced($world))->toContain('acme:shop.acme.com:deactivated>pending');
     });
 
+    it('is released by "check now" past its release, rather than restored by its old record', function () {
+        $world = new AdminWorld();
+        $id = lapsed($world);
+        $old = at($world, 'acme', $id)->token;
+        $world->dns->prove('shop.acme.com', $old);
+
+        AdminWorld::$now = (at($world, 'acme', $id)->deactivatedAt ?? AdminWorld::$now)->addDays(30)->addSecond();
+        $world->act('OrganizationDomains.check', ['domain' => $id]);
+        $domain = at($world, 'acme', $id);
+
+        expect($domain->status)->toBe(TenantDomainStatus::Pending)
+            ->and($domain->token)->not->toBe($old)
+            ->and($world->domains->tenantForHost('shop.acme.com'))->toBeNull()
+            ->and($world->activity->changes())->toContain('tenant.domain_released');
+    });
+
     it('is another tenant\'s only once that tenant proves it with its own token', function () {
         $world = new AdminWorld();
         $id = lapsed($world);
@@ -464,6 +548,36 @@ describe('the domains page', function () {
 });
 
 describe('the record of each change', function () {
+    it('files a takeover\'s lapse in the holder\'s log as the system\'s, with nothing of the claimant\'s request', function () {
+        $world = new AdminWorld(audited: true);
+        verified($world);
+        $world->dns->texts = [];
+        later('+1 day');
+        run($world);
+        $world->act('OrganizationDomains.add', ['host' => 'shop.acme.com'], 'm-9', 'globex.example.test');
+        $globex = $world->domains->forTenant('globex')[0];
+        $world->dns->texts['_tinvar-challenge.shop.acme.com'] = ['tinvar-domain=' . $globex->token];
+        later('+2 minutes');
+
+        // As the Kernel does around every request it handles.
+        $audit = $world->audit ?? throw new \LogicException('No audit log.');
+        $depth = $audit->enterRequest(new \Tinvar\Http\Request('POST', '/_action/x', ['host' => 'globex.example.test'], remoteAddress: '203.0.113.9'), 'req-globex');
+        $world->act('OrganizationDomains.check', ['domain' => $globex->id], 'm-9', 'globex.example.test');
+        $audit->leaveRequest($depth);
+
+        $lapsed = array_values(array_filter(
+            $world->orm->actAs('acme', static fn (): array => $audit->trail()->recent()),
+            static fn ($e): bool => $e->event === TenantChange::DomainLapsed->value,
+        ));
+        expect($world->domains->tenantForHost('shop.acme.com'))->toBe('globex')
+            ->and($lapsed)->toHaveCount(1)
+            ->and($lapsed[0]->actor->kind)->toBe(\Tinvar\Audit\ActorKind::System)
+            ->and($lapsed[0]->actor->id)->toBeNull()
+            ->and($lapsed[0]->request)->toBeNull()
+            ->and($lapsed[0]->action)->toBeNull()
+            ->and($lapsed[0]->panel)->toBeNull();
+    });
+
     it('goes in the audit log of the domain\'s tenant alone, made by nobody', function () {
         $world = new AdminWorld(audited: true);
         verified($world);

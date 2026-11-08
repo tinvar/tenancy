@@ -106,6 +106,8 @@ try {
       records: await card.locator('tbody tr').count(),
       // The schedule's next check, and the last (ADR 0198).
       schedule: await card.getByText(/^Last checked .* UTC\. Next check .* UTC\./).isVisible(),
+      // The record that must stay, said plainly (ADR 0198).
+      keep: await card.getByText(/^Keep the TXT record below published/).isVisible(),
     };
 
     await card.getByRole('button', { name: 'Remove' }).click();

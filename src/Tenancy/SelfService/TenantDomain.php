@@ -20,6 +20,9 @@ final readonly class TenantDomain
      * @param ?CarbonImmutable $unprovedSince when the unbroken run of checks that found its
      *        ownership record missing began (ADR 0198); a lookup that failed neither starts
      *        nor ends one
+     * @param ?CarbonImmutable $unreadableSince when the unbroken run of checks that could not
+     *        read its ownership record at all began: a run of its own, lapsing past the
+     *        pointing grace, so a name whose lookups are made to fail is not served forever
      * @param ?CarbonImmutable $nextCheckAt when the schedule checks it next; null for a pending
      *        or released claim, which it does not check, or one never booked, which is due
      * @param ?DomainLapse $lapse why it went out of service, while Deactivated
@@ -39,6 +42,7 @@ final readonly class TenantDomain
         public ?CarbonImmutable $unprovedSince = null,
         public ?CarbonImmutable $nextCheckAt = null,
         public ?DomainLapse $lapse = null,
+        public ?CarbonImmutable $unreadableSince = null,
     ) {}
 
     /** The record the framework's re-verification reads (CustomDomainVerification, TlsAskEndpoint). */

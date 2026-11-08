@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tinvar\Tenancy\SelfService;
 
 use Carbon\CarbonImmutable;
+use Tinvar\Audit\AuditLog;
 use Tinvar\Auth\AuthContext;
 use Tinvar\Auth\Authenticatable;
 use Tinvar\Events\Events;
@@ -96,6 +97,14 @@ final readonly class TenantDomainReverification implements CustomDomains
     public const int BATCH = 100;
 
     /**
+     * Seconds a domain put in service before re-verification existed has,
+     * from the first check that finds its record gone, before its missing
+     * record's grace starts: fourteen days. ADR 0161 never asked a tenant
+     * to keep the record, and many deleted it once proved (ADR 0198).
+     */
+    public const int UPGRADE_NOTICE = 1_209_600;
+
+    /**
      * @param int $grace seconds a domain whose DNS cannot be read stays in service (the
      *        pointing grace, CustomDomainsConfig's `GRACE`)
      * @param int $proofGrace seconds a domain whose ownership record is missing stays in service
@@ -104,6 +113,8 @@ final readonly class TenantDomainReverification implements CustomDomains
      * @param int $release seconds a lapsed claim waits before it is released
      * @param AuthContext|null $auth the application's, to make a change by nobody where a
      *        request's user did not make it: another tenant's domain lapsed by a proof
+     * @param AuditLog|null $audit the application's, to file a lapse as the system's, with
+     *        nothing of the request in hand -- which may be another tenant's
      */
     public function __construct(
         private Orm $orm,
@@ -119,6 +130,7 @@ final readonly class TenantDomainReverification implements CustomDomains
         private ?RememberedConsents $remembered = null,
         private ?Realms $realms = null,
         private ?AuthContext $auth = null,
+        private ?AuditLog $audit = null,
     ) {
         if ($grace < 0 || $proofGrace < 0) {
             throw new \InvalidArgumentException('A grace period is zero seconds or more.');
@@ -153,6 +165,9 @@ final readonly class TenantDomainReverification implements CustomDomains
         }
         if ($domain->unprovedSince !== null) {
             $at[] = $domain->unprovedSince->addSeconds($this->proofGrace);
+        }
+        if ($domain->unreadableSince !== null) {
+            $at[] = $domain->unreadableSince->addSeconds($this->grace);
         }
 
         return $at === [] ? null : min($at);
@@ -266,13 +281,20 @@ final readonly class TenantDomainReverification implements CustomDomains
     /**
      * Whether $tenant may claim $host though another tenant holds it: the
      * holder is in the table and failing for want of its ownership record,
-     * so a proof by $tenant may take it over.
+     * its grace begun -- not inside an upgrade's notice -- so a proof by
+     * $tenant may take it over.
      */
     public function contestable(string $tenant, string $host): bool
     {
         $holder = $this->domains->holding($host);
 
-        return $holder !== null && $holder->tenant !== $tenant && $holder->unprovedSince !== null;
+        return $holder !== null && $holder->tenant !== $tenant && $this->unprovedNow($holder);
+    }
+
+    /** Whether $domain's run of missing records has begun by now: not waiting out an upgrade's notice. */
+    private function unprovedNow(TenantDomain $domain): bool
+    {
+        return $domain->unprovedSince !== null && $domain->unprovedSince->lessThanOrEqualTo($this->now());
     }
 
     // CustomDomains: the framework's checks of where a domain points, recorded as ours are.
@@ -326,10 +348,15 @@ final readonly class TenantDomainReverification implements CustomDomains
             $failingSince = null;
         }
 
+        // A domain the schedule has never booked was put in service before
+        // re-verification: a missing record starts its grace only after a
+        // notice, since nothing asked its tenant to keep the record.
+        $upgraded = $domain->nextCheckAt === null && $domain->unprovedSince === null;
         $unprovedSince = match ($proof->proof) {
             OwnershipProof::Proved => null,
-            OwnershipProof::Missing => $domain->unprovedSince ?? $now,
-            // A lookup that failed is no answer: the run of misses, if any, stands as it was.
+            OwnershipProof::Missing => $domain->unprovedSince ?? ($upgraded ? $now->addSeconds(self::UPGRADE_NOTICE) : $now),
+            // A lookup that failed is no answer about the record: the run of
+            // misses, if any, stands as it was -- neither begun nor ended.
             OwnershipProof::Unreadable => $domain->unprovedSince,
         };
         if ($proof->proof === OwnershipProof::Missing && $now->getTimestamp() - $unprovedSince->getTimestamp() > $this->proofGrace) {
@@ -337,18 +364,31 @@ final readonly class TenantDomainReverification implements CustomDomains
 
             return;
         }
+        // But a run of lookups that fail is a clock of its own, lapsing past
+        // the pointing grace as unreadable pointing does: whoever controls
+        // the name could otherwise keep it served here for ever by making
+        // only the record's lookups fail. A readable answer ends the run.
+        $unreadableSince = $proof->proof === OwnershipProof::Unreadable ? ($domain->unreadableSince ?? $now) : null;
+        if ($unreadableSince !== null && $now->getTimestamp() - $unreadableSince->getTimestamp() > $this->grace) {
+            $this->lapse($domain, $now, DomainLapse::Ownership, 'Its ownership record could not be read at any check since ' . $unreadableSince->toAtomString() . ": {$proof->reason}");
 
-        $status = $failingSince !== null || $unprovedSince !== null ? TenantDomainStatus::Failing : TenantDomainStatus::Verified;
+            return;
+        }
+
+        $status = $failingSince !== null || $unprovedSince !== null || $unreadableSince !== null ? TenantDomainStatus::Failing : TenantDomainStatus::Verified;
         $reason = match (true) {
+            $unprovedSince !== null && $unprovedSince->greaterThan($now) => 'Custom domains are now checked for their ownership record every day. Keep the TXT record shown published: '
+                . $proof->reason . ' It is still served until ' . $unprovedSince->addSeconds($this->proofGrace)->toAtomString() . '; publish the record again before then.',
             $unprovedSince !== null => ($proof->proof === OwnershipProof::Missing ? $proof->reason : 'Its ownership record was missing, and could not be read at the last check.')
                 . ' It is still served until ' . $unprovedSince->addSeconds($this->proofGrace)->toAtomString() . '; publish the record again before then.',
+            $unreadableSince !== null => "Its ownership record could not be read at the last check ({$proof->reason}). If it still cannot be read after " . $unreadableSince->addSeconds($this->grace)->toAtomString() . ', it stops being served; check the nameservers that answer for it.',
             $failingSince !== null => 'Its DNS could not be read at the last check. It stays in service for now; check its records.',
-            $proof->proof === OwnershipProof::Unreadable => 'It points at the platform. Its ownership record could not be read at this check, which does not count against it.',
             default => 'It is yours, and it points at the platform.',
         };
 
-        $this->within($domain->tenant, function () use ($domain, $now, $status, $failingSince, $unprovedSince, $reason): void {
-            $changed = $this->domains->rechecked($domain, $now, $this->next($domain, $now, $status, $failingSince, $unprovedSince), $status, $failingSince, $unprovedSince, $reason);
+        $this->within($domain->tenant, function () use ($domain, $now, $status, $failingSince, $unprovedSince, $unreadableSince, $reason): void {
+            $next = $this->next($domain, $now, $status, $failingSince, $unprovedSince, $unreadableSince);
+            $changed = $this->domains->rechecked($domain, $now, $next, $status, $failingSince, $unprovedSince, $reason, $unreadableSince);
             if ($changed && $status !== $domain->status) {
                 $this->announce($domain, $status, $status === TenantDomainStatus::Failing ? TenantChange::DomainFailing : TenantChange::DomainRestored, $reason, null, $now, null);
             }
@@ -359,6 +399,14 @@ final readonly class TenantDomainReverification implements CustomDomains
     private function prove(TenantDomain $domain, ?Authenticatable $actor): void
     {
         $now = $this->now();
+        // A lapsed claim past its release is released, whether or not the
+        // schedule has got to it: its old record is never a proof again.
+        $releasesAt = $this->releasesAt($domain);
+        if ($releasesAt !== null && $now->greaterThan($releasesAt)) {
+            $this->releaseClaim($domain, $now);
+
+            return;
+        }
         $proof = $this->ownership->check($domain->host, $domain->token);
         $missing = $proof->proof === OwnershipProof::Proved ? null : $proof->reason;
         $pointing = $this->verifier->check($domain->host);
@@ -405,7 +453,7 @@ final readonly class TenantDomainReverification implements CustomDomains
     private function contest(TenantDomain $claimant, CarbonImmutable $now): bool
     {
         $holder = $this->domains->holding($claimant->host);
-        if ($holder === null || $holder->tenant === $claimant->tenant || $holder->unprovedSince === null) {
+        if ($holder === null || $holder->tenant === $claimant->tenant || !$this->unprovedNow($holder)) {
             return false;
         }
         if ($this->ownership->check($holder->host, $holder->token)->proof !== OwnershipProof::Missing) {
@@ -418,7 +466,7 @@ final readonly class TenantDomainReverification implements CustomDomains
     /** Takes $domain out of service, records and announces it, and forgets its remembered consents. */
     private function lapse(TenantDomain $domain, CarbonImmutable $now, DomainLapse $lapse, string $reason): bool
     {
-        return $this->asNobody(fn (): bool => $this->within($domain->tenant, function () use ($domain, $now, $lapse, $reason): bool {
+        return $this->asSystem(fn (): bool => $this->within($domain->tenant, function () use ($domain, $now, $lapse, $reason): bool {
             if (!$this->domains->lapse($domain, $now, $this->next($domain, $now, TenantDomainStatus::Verified), $lapse, $reason)) {
                 return false;
             }
@@ -505,6 +553,7 @@ final readonly class TenantDomainReverification implements CustomDomains
         TenantDomainStatus $status,
         ?CarbonImmutable $failingSince = null,
         ?CarbonImmutable $unprovedSince = null,
+        ?CarbonImmutable $unreadableSince = null,
     ): CarbonImmutable {
         if ($status === TenantDomainStatus::Failing) {
             $next = [$at->addSeconds(min($this->interval, self::FAILING_INTERVAL))];
@@ -513,6 +562,9 @@ final readonly class TenantDomainReverification implements CustomDomains
             }
             if ($unprovedSince !== null) {
                 $next[] = $unprovedSince->addSeconds($this->proofGrace + 1);
+            }
+            if ($unreadableSince !== null) {
+                $next[] = $unreadableSince->addSeconds($this->grace + 1);
             }
 
             return max($at->addSecond(), min($next));
@@ -536,12 +588,20 @@ final readonly class TenantDomainReverification implements CustomDomains
     }
 
     /**
+     * $work as the platform's own: by nobody, so an event's afterCommit
+     * listener runs as nobody, and filed in the audit log as the system's,
+     * with no request, action or panel -- the request in hand may be
+     * another tenant's, whose host, address and user are not this tenant's
+     * log's to keep.
+     *
      * @template T
      * @param \Closure(): T $work
      * @return T
      */
-    private function asNobody(\Closure $work): mixed
+    private function asSystem(\Closure $work): mixed
     {
-        return $this->auth === null ? $work() : $this->auth->actingAs(null, $work);
+        $audited = $this->audit === null ? $work : fn (): mixed => $this->audit->asSystem($work);
+
+        return $this->auth === null ? $audited() : $this->auth->actingAs(null, $audited);
     }
 }

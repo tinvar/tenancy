@@ -204,6 +204,7 @@ final readonly class TenantSelfService
             $remembered,
             $realms,
             $auth,
+            $audit,
         );
         // The framework's check of where a domain points -- Caddy's ask, and
         // VerifyCustomDomains where it is still listed -- writes through the

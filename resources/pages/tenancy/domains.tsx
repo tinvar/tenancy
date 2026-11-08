@@ -131,19 +131,27 @@ function DomainCard({ domain, data }: { domain: TenantDomain; data: TenantDomain
               .join(' ')}
           </Text>
         </Stack>
-        {domain.status !== 'verified' && (
-          <div {...stylex.props(styles.records)}>
-            <Table label={`DNS records for ${domain.host}`}>
-              <THead>
-                <Tr>
-                  <Th>Type</Th>
-                  <Th>Name</Th>
-                  <Th>Value</Th>
-                  <Th>For</Th>
-                </Tr>
-              </THead>
-              <TBody>
-                {domain.records.map((record) => (
+        {(domain.status === 'verified' || domain.status === 'failing') && (
+          <Text tone="warn" weight={500}>
+            Keep the TXT record below published. It is checked every day, and without it this domain stops
+            being served.
+          </Text>
+        )}
+        <div {...stylex.props(styles.records)}>
+          <Table label={`DNS records for ${domain.host}`}>
+            <THead>
+              <Tr>
+                <Th>Type</Th>
+                <Th>Name</Th>
+                <Th>Value</Th>
+                <Th>For</Th>
+              </Tr>
+            </THead>
+            <TBody>
+              {domain.records
+                // Once in service, the record that must stay is the one that proves it.
+                .filter((record) => domain.status !== 'verified' || record.purpose === 'ownership')
+                .map((record) => (
                   <Tr key={`${record.type}:${record.name}:${record.value}`}>
                     <Td mono>{record.type}</Td>
                     <Td mono>{record.name}</Td>
@@ -153,10 +161,9 @@ function DomainCard({ domain, data }: { domain: TenantDomain; data: TenantDomain
                     </Td>
                   </Tr>
                 ))}
-              </TBody>
-            </Table>
-          </div>
-        )}
+            </TBody>
+          </Table>
+        </div>
       </Card>
     </section>
   );

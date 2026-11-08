@@ -125,10 +125,12 @@ final readonly class TenantDomains implements CustomDomains
     private static function reverificationColumns(Table $domains): void
     {
         // When the run of checks that found the ownership record missing
-        // began; when the schedule checks the domain next; and why it went
-        // out of service (DomainLapse), while it is out. A string, not an
-        // enum's CHECK, so a cause added later needs no change to the table.
+        // began, and the run that could not read it at all; when the
+        // schedule checks the domain next; and why it went out of service
+        // (DomainLapse), while it is out. A string, not an enum's CHECK, so
+        // a cause added later needs no change to the table.
         $domains->timestamp('unproved_since')->nullable();
+        $domains->timestamp('unreadable_since')->nullable();
         $domains->timestamp('next_check_at')->nullable();
         $domains->string('lapse', 16)->nullable();
     }
@@ -245,7 +247,7 @@ final readonly class TenantDomains implements CustomDomains
             // so a refusal by the index leaves the action's able to go on.
             return $this->as($domain->tenant, fn (): bool => $this->connection->transaction(fn (): bool => $this->connection->execute(
                 "UPDATE {$this->table} SET status = ?, held_host = host, reason = ?, checked_at = ?, verified_at = ?, failing_since = NULL, deactivated_at = NULL, "
-                . 'unproved_since = NULL, lapse = NULL, next_check_at = ? WHERE tenant_id = ? AND id = ?',
+                . 'unproved_since = NULL, unreadable_since = NULL, lapse = NULL, next_check_at = ? WHERE tenant_id = ? AND id = ?',
                 [TenantDomainStatus::Verified->value, $reason, $when, $when, $next === null ? null : $this->timestamps->format($next), $domain->tenant, $id],
             ) === 1));
         } catch (\PDOException) {
@@ -325,6 +327,7 @@ final readonly class TenantDomains implements CustomDomains
         ?CarbonImmutable $failingSince,
         ?CarbonImmutable $unprovedSince,
         string $reason,
+        ?CarbonImmutable $unreadableSince = null,
     ): bool {
         if (!$status->active()) {
             throw new \LogicException('A domain rechecked into service is Verified or Failing.');
@@ -332,9 +335,9 @@ final readonly class TenantDomains implements CustomDomains
         $format = fn (?CarbonImmutable $moment): ?string => $moment === null ? null : $this->timestamps->format($moment);
 
         return $this->as($domain->tenant, fn (): int => $this->connection->execute(
-            "UPDATE {$this->table} SET status = ?, checked_at = ?, next_check_at = ?, failing_since = ?, unproved_since = ?, reason = ? "
+            "UPDATE {$this->table} SET status = ?, checked_at = ?, next_check_at = ?, failing_since = ?, unproved_since = ?, unreadable_since = ?, reason = ? "
             . 'WHERE tenant_id = ? AND id = ? AND held_host IS NOT NULL',
-            [$status->value, $format($at), $format($next), $format($failingSince), $format($unprovedSince), $reason, $domain->tenant, $domain->id],
+            [$status->value, $format($at), $format($next), $format($failingSince), $format($unprovedSince), $format($unreadableSince), $reason, $domain->tenant, $domain->id],
         )) === 1;
     }
 
@@ -349,7 +352,7 @@ final readonly class TenantDomains implements CustomDomains
 
         return $this->as($domain->tenant, fn (): int => $this->connection->execute(
             "UPDATE {$this->table} SET status = ?, held_host = NULL, checked_at = ?, deactivated_at = ?, next_check_at = ?, failing_since = NULL, "
-            . 'unproved_since = NULL, lapse = ?, reason = ? WHERE tenant_id = ? AND id = ? AND held_host IS NOT NULL',
+            . 'unproved_since = NULL, unreadable_since = NULL, lapse = ?, reason = ? WHERE tenant_id = ? AND id = ? AND held_host IS NOT NULL',
             [TenantDomainStatus::Deactivated->value, $when, $when, $next === null ? null : $this->timestamps->format($next), $lapse->value, $reason, $domain->tenant, $domain->id],
         )) === 1;
     }
@@ -380,7 +383,7 @@ final readonly class TenantDomains implements CustomDomains
     {
         return $this->as($domain->tenant, fn (): int => $this->connection->execute(
             "UPDATE {$this->table} SET status = ?, token = ?, checked_at = ?, deactivated_at = NULL, next_check_at = NULL, failing_since = NULL, "
-            . 'unproved_since = NULL, lapse = NULL, reason = ? WHERE tenant_id = ? AND id = ? AND status = ? AND held_host IS NULL',
+            . 'unproved_since = NULL, unreadable_since = NULL, lapse = NULL, reason = ? WHERE tenant_id = ? AND id = ? AND status = ? AND held_host IS NULL',
             [TenantDomainStatus::Pending->value, bin2hex(random_bytes(16)), $this->timestamps->format($at), $reason, $domain->tenant, $domain->id, TenantDomainStatus::Deactivated->value],
         )) === 1;
     }
@@ -472,8 +475,8 @@ final readonly class TenantDomains implements CustomDomains
         // Where it points is all this check read: a run of missing
         // ownership records (ADR 0198) goes on, and keeps it failing.
         $this->asHolderOf($host, fn (): int => $this->connection->execute(
-            "UPDATE {$this->table} SET status = CASE WHEN unproved_since IS NULL THEN ? ELSE ? END, checked_at = ?, failing_since = NULL, "
-            . 'reason = CASE WHEN unproved_since IS NULL THEN ? ELSE reason END WHERE held_host = ?',
+            "UPDATE {$this->table} SET status = CASE WHEN unproved_since IS NULL AND unreadable_since IS NULL THEN ? ELSE ? END, checked_at = ?, failing_since = NULL, "
+            . 'reason = CASE WHEN unproved_since IS NULL AND unreadable_since IS NULL THEN ? ELSE reason END WHERE held_host = ?',
             [TenantDomainStatus::Verified->value, TenantDomainStatus::Failing->value, $this->timestamps->format($at), 'It points at the platform.', $host],
         ));
     }
@@ -495,7 +498,7 @@ final readonly class TenantDomains implements CustomDomains
     public function deactivate(string $host, string $reason, \DateTimeImmutable $at): void
     {
         $this->asHolderOf($host, fn (): int => $this->connection->execute(
-            "UPDATE {$this->table} SET status = ?, held_host = NULL, checked_at = ?, deactivated_at = ?, unproved_since = NULL, lapse = ?, reason = ? WHERE held_host = ?",
+            "UPDATE {$this->table} SET status = ?, held_host = NULL, checked_at = ?, deactivated_at = ?, unproved_since = NULL, unreadable_since = NULL, lapse = ?, reason = ? WHERE held_host = ?",
             [TenantDomainStatus::Deactivated->value, $this->timestamps->format($at), $this->timestamps->format($at), DomainLapse::Pointing->value, $reason, $host],
         ));
     }
@@ -549,6 +552,7 @@ final readonly class TenantDomains implements CustomDomains
             unprovedSince: $at($row['unproved_since'] ?? null),
             nextCheckAt: $at($row['next_check_at'] ?? null),
             lapse: \is_string($row['lapse'] ?? null) ? DomainLapse::tryFrom($row['lapse']) : null,
+            unreadableSince: $at($row['unreadable_since'] ?? null),
         );
     }
 

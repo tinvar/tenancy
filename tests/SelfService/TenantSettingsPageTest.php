@@ -291,3 +291,29 @@ describe('the audit log', function () {
             ->and($globex)->toBe([]);
     });
 });
+
+describe('the kit\'s registrations', function () {
+    it('binds the memberships it was given and its user lookup, which the policy and the invite job are built with', function () {
+        $world = new AdminWorld();
+        $container = $world->kit->register(new \Tinvar\Container\Container());
+
+        expect($container->get(\Tinvar\Auth\Memberships::class))->toBe($world->members)
+            ->and($container->get(\Tinvar\Auth\TenantMemberships::class))->toBe($world->members)
+            ->and($container->get(\Tinvar\Auth\UserLookup::class))->toBe($world->people);
+    });
+
+    it('leaves a binding the app made already as the app made it', function () {
+        $world = new AdminWorld();
+        $own = new \Tinvar\Tenancy\SelfService\DatabaseTenantMembers($world->orm, $world->people);
+        $lookup = new \Tinvar\Tests\Tenancy\SelfService\Fixtures\People();
+        $container = new \Tinvar\Container\Container()
+            ->instance(\Tinvar\Auth\Memberships::class, $own)
+            ->bind(\Tinvar\Auth\TenantMemberships::class, static fn (): object => $own)
+            ->instance(\Tinvar\Auth\UserLookup::class, $lookup);
+        $world->kit->register($container);
+
+        expect($container->get(\Tinvar\Auth\Memberships::class))->toBe($own)
+            ->and($container->get(\Tinvar\Auth\TenantMemberships::class))->toBe($own)
+            ->and($container->get(\Tinvar\Auth\UserLookup::class))->toBe($lookup);
+    });
+});

@@ -80,6 +80,12 @@ final readonly class TenantSelfService
     /** Where every change is recorded: the given activity, the audit log, or nowhere. */
     public TenantActivity $activity;
 
+    /** The memberships it was given, which the switcher lists, every panel checks and TenantAdministrationPolicy reads. */
+    public Memberships&TenantMemberships $memberships;
+
+    /** The users it was given, which SendTenantInvite reads an invitee by. */
+    public UserLookup $users;
+
     /**
      * @param Memberships&TenantMemberships $memberships the application's memberships, which
      *        the switcher lists and every panel checks -- DatabaseTenantMembers, or its own
@@ -129,6 +135,8 @@ final readonly class TenantSelfService
         string $invitePath = '/invite',
         bool $localHttp = false,
     ) {
+        $this->memberships = $memberships;
+        $this->users = $users;
         $this->activity = $activity ?? ($audit === null ? new UnrecordedTenantActivity() : new AuditedTenantActivity($audit));
         $this->switchboard = new TenantSwitchboard($orm, $auth, $memberships, $this->activity, $realms, $addresses, $switcher, $profiles);
         $this->links = new TenantLinks($canonical, $addresses, $localHttp);
@@ -202,9 +210,20 @@ final readonly class TenantSelfService
     /** The tables migrate() makes, last first, for a migration's down(). */
     public const array TABLES = [TenantDomains::TABLE, DatabaseTenantMembers::TABLE, DatabaseTenants::SLUGS_TABLE, DatabaseTenants::TABLE];
 
-    /** What the pages, the policy, the invite job and the Kernel are built with. */
+    /**
+     * What the pages, the policy, the invite job and the Kernel are built
+     * with. The memberships and the user lookup it was given too, unless the
+     * application registered its own already: the accounts kit registers
+     * the lookup first, where the application uses it.
+     */
     public function register(Container $container): Container
     {
+        foreach ([Memberships::class => $this->memberships, TenantMemberships::class => $this->memberships, UserLookup::class => $this->users] as $class => $instance) {
+            if (!$container->registered($class)) {
+                $container->instance($class, $instance);
+            }
+        }
+
         $container
             ->instance(TenantSwitchboard::class, $this->switchboard)
             ->instance(TenantLinks::class, $this->links)

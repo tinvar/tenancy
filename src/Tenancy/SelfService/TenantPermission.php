@@ -20,4 +20,7 @@ enum TenantPermission: string
 
     /** Invite, re-role and remove the tenant's members. */
     case Members = 'tenant.members';
+
+    /** See, make, revoke and end the tenant's own API tokens (ADR 0193). */
+    case ApiTokens = 'tenant.api-tokens';
 }

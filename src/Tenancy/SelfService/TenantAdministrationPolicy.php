@@ -78,6 +78,24 @@ abstract class TenantAdministrationPolicy
     }
 
     /**
+     * The tenant's API tokens (ADR 0193): a membership carrying the
+     * permission for them. A token is never asked here: this policy does
+     * not name TenantTokenActor, so no token sees or makes another.
+     *
+     * @param array<string, mixed> $arguments
+     */
+    public function viewTenantApiTokens(?Authenticatable $user, string $subject, array $arguments = []): bool
+    {
+        return $this->membership($user)?->can(TenantPermission::ApiTokens->value) === true;
+    }
+
+    /** @param array<string, mixed> $arguments */
+    public function manageTenantApiTokens(?Authenticatable $user, string $subject, array $arguments = []): bool
+    {
+        return $this->membership($user)?->can(TenantPermission::ApiTokens->value) === true;
+    }
+
+    /**
      * Anyone holding the link may see it; accepting it takes someone signed
      * in as the invited address's account, and Invitations checks the link
      * -- its tenant, its origin, its expiry, its single use, and the

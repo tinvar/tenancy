@@ -34,6 +34,12 @@ enum TenantAbility: string
     /** Invite members, revoke invites, change a member's role, remove a member. */
     case ManageMembers = 'manageTenantMembers';
 
+    /** See the tenant's API tokens: their names, scopes, makers and last use (ADR 0193). */
+    case ViewApiTokens = 'viewTenantApiTokens';
+
+    /** Make, revoke, and end every one of, the tenant's API tokens (ADR 0193). */
+    case ManageApiTokens = 'manageTenantApiTokens';
+
     /**
      * Open an invite's page and accept it: the emailed link is the
      * credential, and Invitations holds it to its own rules.

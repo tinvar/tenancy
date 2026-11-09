@@ -19,7 +19,7 @@ final readonly class TenantWebhooksPageData extends Data
      * @param list<TenantWebhookData> $subscriptions
      * @param list<string> $events
      * @param list<WebhookDeliveryData> $deliveries the open subscription's, newest first
-     * @param array<string, string> $actions by method: create, update, pause, resume, delete, rotate, test, resend
+     * @param array<string, string> $actions by method: create, update, pause, resume, remove, rotate, test, resend
      */
     public function __construct(
         public array $subscriptions,

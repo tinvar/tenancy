@@ -437,6 +437,17 @@ it('registers as a page and its actions, by the build rules', function () {
     ]);
 });
 
+it('hands its view only actions it registers, remove among them', function () {
+    $actions = new \Tinvar\Actions\ActionRegistry();
+    $actions->registerAll([OrganizationWebhooks::class]);
+    $registered = array_map(static fn ($a): string => $a->name, $actions->all());
+    $handed = (new Page())->view()->actions;
+
+    expect($handed['remove'] ?? null)->toBe('OrganizationWebhooks.remove')
+        ->and(array_values(array_diff($handed, $registered)))->toBe([])
+        ->and($handed)->toHaveCount(\count($registered));
+});
+
 it('carries #[Authorize] on its final loader and each final action', function () {
     $reflection = new \ReflectionClass(TenantWebhooksPage::class);
     $abilities = static fn (string $method): array => array_map(

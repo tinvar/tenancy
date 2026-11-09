@@ -58,7 +58,7 @@ use Tinvar\Webhooks\WebhookSubscriptionRefused;
  *
  * Seeing it is `viewTenantWebhooks`; each change is `manageTenantWebhooks`
  * too, and a resend `resendTenantWebhooks`, each on its final action --
- * `<Class>.create`, `.update`, `.pause`, `.resume`, `.delete`, `.rotate`,
+ * `<Class>.create`, `.update`, `.pause`, `.resume`, `.remove`, `.rotate`,
  * `.test`, `.resend` -- whose defaults ask for the `tenant.webhooks`
  * permission, an owner's, or the ones the application's policy names for
  * each of seeing, changing and resending. Tests and resends each send a
@@ -109,7 +109,7 @@ abstract class TenantWebhooksPage extends SelfServicePage
         $open = $request->query['subscription'] ?? null;
         $opened = \is_string($open) ? $this->subscriptions->get($open) : null;
         $actions = [];
-        foreach (['create', 'update', 'pause', 'resume', 'delete', 'rotate', 'test', 'resend'] as $method) {
+        foreach (['create', 'update', 'pause', 'resume', 'remove', 'rotate', 'test', 'resend'] as $method) {
             $actions[$method] = $this->action($method);
         }
 

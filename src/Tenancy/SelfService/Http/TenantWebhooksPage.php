@@ -186,7 +186,7 @@ abstract class TenantWebhooksPage extends SelfServicePage
     }
 
     #[Action(transaction: true), Authorize(TenantAbility::ManageWebhooks->value, TenantAdministration::class)]
-    final public function delete(WebhookRequest $input): ActionResult
+    final public function remove(WebhookRequest $input): ActionResult
     {
         $tenant = $this->tenant();
         $subscription = $this->found($input->subscription);

@@ -282,7 +282,7 @@ it('makes a subscription shown once, changes, pauses, resumes, rotates, tests an
         ->and($p->queue->pushed()[0]->payload)->toContain(TenantWebhooksPage::TEST_EVENT)->toContain($tested['delivery'])
         ->and($p->sent->find('acme', $tested['delivery']))->toBeNull();
 
-    $p->as('m-1', fn () => $p->page->delete(new WebhookRequest($id)));
+    $p->as('m-1', fn () => $p->page->remove(new WebhookRequest($id)));
     expect($p->stored($id))->toBeNull()
         ->and($p->activity->changes())->toBe([
             'tenant.webhook_created', 'tenant.webhook_updated', 'tenant.webhook_paused', 'tenant.webhook_resumed',
@@ -308,7 +308,7 @@ it('finds none of acme\'s subscriptions from globex\'s page, and lets the owner 
 
     expect($p->view('m-9', tenant: 'globex')->subscriptions)->toBe([])
         ->and($p->view('m-9', ['subscription' => $id], 'globex')->open)->toBeNull()
-        ->and(fn () => $p->as('m-9', fn () => $p->page->delete(new WebhookRequest($id)), 'globex'))->toThrow(HttpException::class)
+        ->and(fn () => $p->as('m-9', fn () => $p->page->remove(new WebhookRequest($id)), 'globex'))->toThrow(HttpException::class)
         ->and(fn () => $p->as('m-9', fn () => $p->page->rotate(new WebhookRequest($id)), 'globex'))->toThrow(HttpException::class)
         ->and($p->stored($id))->not->toBeNull()
         ->and($p->may('m-1', TenantAbility::ManageWebhooks))->toBeTrue()
@@ -433,7 +433,7 @@ it('registers as a page and its actions, by the build rules', function () {
 
     expect(array_map(static fn ($a): string => $a->name, $actions->all()))->toEqualCanonicalizing([
         'OrganizationWebhooks.create', 'OrganizationWebhooks.update', 'OrganizationWebhooks.pause', 'OrganizationWebhooks.resume',
-        'OrganizationWebhooks.delete', 'OrganizationWebhooks.rotate', 'OrganizationWebhooks.test', 'OrganizationWebhooks.resend',
+        'OrganizationWebhooks.remove', 'OrganizationWebhooks.rotate', 'OrganizationWebhooks.test', 'OrganizationWebhooks.resend',
     ]);
 });
 
@@ -446,7 +446,7 @@ it('carries #[Authorize] on its final loader and each final action', function ()
 
     expect($abilities('__invoke'))->toBe(['viewTenantWebhooks'])
         ->and($abilities('resend'))->toBe(['viewTenantWebhooks', 'resendTenantWebhooks']);
-    foreach (['create', 'update', 'pause', 'resume', 'delete', 'rotate', 'test'] as $method) {
+    foreach (['create', 'update', 'pause', 'resume', 'remove', 'rotate', 'test'] as $method) {
         expect($abilities($method))->toBe(['viewTenantWebhooks', 'manageTenantWebhooks'])
             ->and($reflection->getMethod($method)->isFinal())->toBeTrue();
     }

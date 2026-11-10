@@ -13,6 +13,8 @@ enum TenantChange: string
     case MemberInvited = 'tenant.member_invited';
     case InviteRevoked = 'tenant.invite_revoked';
     case InviteAccepted = 'tenant.invite_accepted';
+    /** An invite turned down by the person it was sent to, signed in (ADR 0201). */
+    case InviteDeclined = 'tenant.invite_declined';
     case RoleChanged = 'tenant.role_changed';
     case MemberRemoved = 'tenant.member_removed';
     case DomainAdded = 'tenant.domain_added';

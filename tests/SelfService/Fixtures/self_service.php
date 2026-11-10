@@ -449,6 +449,9 @@ final class AdminWorld
 
     public ?\Tinvar\Audit\AuditLog $audit = null;
 
+    /** Who is signed in, for a test calling the kit's services directly. */
+    public readonly AuthContext $auth;
+
     public function __construct(?PdoConnection $connection = null, int $limit = 3, bool $addressed = true, bool $audited = false)
     {
         self::$now = CarbonImmutable::parse('2026-11-02 12:00:00', 'UTC');
@@ -470,7 +473,7 @@ final class AdminWorld
             $this->members->grant($tenant, 'customer', $user, $role);
         }
 
-        $auth = new AuthContext();
+        $auth = $this->auth = new AuthContext();
         $this->dns = new FakeDns();
         $this->activity = new RecordedActivity();
         $this->events = new \Tinvar\Events\EventFake($this->orm);

@@ -67,6 +67,9 @@ final readonly class TenantSelfService
 
     public Invitations $invitations;
 
+    /** The invites sent to whoever is signed in, accepted or declined without the emailed link (ADR 0201). */
+    public PersonalInvitations $personalInvitations;
+
     public InvitePolicy $invitePolicy;
 
     public TenantSettings $settings;
@@ -114,7 +117,8 @@ final readonly class TenantSelfService
      *        EmailLinks and CanonicalOrigins the same flag, so a one-host app whose platform origin
      *        is http://app.localhost:PORT builds its invites there (ADR 0182)
      * @param Events|null $events where a custom domain's change of state is dispatched, as
-     *        TenantDomainChanged, for the application to tell the tenant's admins (ADR 0198)
+     *        TenantDomainChanged, for the application to tell the tenant's admins (ADR 0198), and
+     *        an invite declined, as TenantInviteDeclined (ADR 0201)
      * @param RememberedConsents|null $remembered the handoff's remembered consents: a domain that
      *        lapses is forgotten there for everyone (ADR 0198)
      */
@@ -154,6 +158,7 @@ final readonly class TenantSelfService
         $this->links = new TenantLinks($canonical, $addresses, $localHttp);
         $this->invitePolicy = new RoleInvitePolicy($members, $this->roles);
         $this->invitations = new Invitations($emailLinks, $this->invitePolicy, $users, $invitePath);
+        $this->personalInvitations = new PersonalInvitations($orm, $auth, $users, $this->invitations, $members, $profiles, $this->roles, $this->activity, $events);
 
         $invites ??= $dispatcher === null
             ? throw new \InvalidArgumentException('Invites are sent off the request: give the self-service kit the Dispatcher, or TenantInvites of your own.')
@@ -258,6 +263,7 @@ final readonly class TenantSelfService
             ->instance(TenantSwitchboard::class, $this->switchboard)
             ->instance(TenantLinks::class, $this->links)
             ->instance(Invitations::class, $this->invitations)
+            ->instance(PersonalInvitations::class, $this->personalInvitations)
             ->instance(InvitePolicy::class, $this->invitePolicy)
             ->instance(TenantSettings::class, $this->settings)
             ->instance(TenantProfiles::class, $this->profiles)

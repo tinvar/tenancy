@@ -33,7 +33,7 @@ use Tinvar\Tests\Tenancy\SelfService\Fixtures\InviteMails;
 require_once __DIR__ . '/Fixtures/self_service.php';
 
 /** The world's settings, with invite budgets of $perHour and $open. */
-function budgeted(AdminWorld $world, ArrayThrottleStore $throttles, int $perHour = 100, int $open = 100): TenantSettings
+function budgeted(AdminWorld $world, ArrayThrottleStore $throttles, int $perHour = 100, int $open = 100, int $perActor = 100): TenantSettings
 {
     return new TenantSettings(
         $world->tenants,
@@ -44,6 +44,7 @@ function budgeted(AdminWorld $world, ArrayThrottleStore $throttles, int $perHour
         throttles: $throttles,
         invitesPerHour: $perHour,
         openInvites: $open,
+        actorInvitesPerHour: $perActor,
     );
 }
 
@@ -198,6 +199,30 @@ describe('invites', function () {
         expect($refused?->status)->toBe(429)
             ->and($refused?->getMessage())->toContain('this hour')
             ->and(array_column($world->invites->sent, 'email'))->toBe(['one@example.net', 'two@example.net', 'zed@example.net']);
+    });
+
+    // One person may administer many organizations, each with a budget of
+    // its own: their own budget holds what they send across all of them,
+    // and spent, refuses them before it touches the organization's.
+    it('sends one person no more invites an hour than their own budget, counted per person beside the organization\'s (ADR 0220)', function () {
+        $world = new AdminWorld();
+        $throttles = new ArrayThrottleStore();
+        $settings = budgeted($world, $throttles, perHour: 3, perActor: 2);
+        $ann = new Person('m-1', '', '');
+
+        $world->orm->actAs('acme', static function () use ($settings, $ann): void {
+            $settings->invite('acme', 'customer', 'one@example.net', 'member', $ann);
+            $settings->invite('acme', 'customer', 'two@example.net', 'member', $ann);
+        });
+        $refused = $world->orm->actAs('acme', static fn (): ?HttpException => refused(static fn () => $settings->invite('acme', 'customer', 'three@example.net', 'member', $ann)));
+        $again = $world->orm->actAs('acme', static fn (): ?HttpException => refused(static fn () => $settings->invite('acme', 'customer', 'four@example.net', 'member', $ann)));
+        // Bob's budget is his own, and Ann's refusals spent none of acme's.
+        $world->orm->actAs('acme', static fn () => $settings->invite('acme', 'customer', 'bob@example.org', 'member', new Person('m-2', '', '')));
+
+        expect($refused?->status)->toBe(429)
+            ->and($refused?->getMessage())->toContain('You have sent')
+            ->and($again?->status)->toBe(429)
+            ->and(array_column($world->invites->sent, 'email'))->toBe(['one@example.net', 'two@example.net', 'bob@example.org']);
     });
 
     it('keeps no more invites open in an organization than its budget, however slowly they are sent (ADR 0220)', function () {

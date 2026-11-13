@@ -38,7 +38,8 @@ use Tinvar\Validation\ValidationException;
  * - **Invites are budgeted** per organization (ADR 0220): each is mail the
  *   platform sends to any address, under a name the organization chose, so
  *   no more than OPEN_INVITES are open in a panel and no more than
- *   INVITES_PER_HOUR are sent an hour.
+ *   INVITES_PER_HOUR are sent an hour; and per person, who may administer
+ *   many, no more than ACTOR_INVITES_PER_HOUR from all of them.
  *
  * Each refusal is a ValidationException under the field it is about, with
  * what to do; a member, an invite or a role that is not this tenant's is a
@@ -50,6 +51,13 @@ final readonly class TenantSettings
 
     /** Invites one organization may send an hour, whoever in it sends them (ADR 0220). */
     public const int INVITES_PER_HOUR = 60;
+
+    /**
+     * Invites one person may send an hour, from every organization they
+     * administer together: each has a budget of its own, and a person may
+     * make or be given many (ADR 0220).
+     */
+    public const int ACTOR_INVITES_PER_HOUR = 60;
 
     /** Invites one organization may hold open in a panel at once: as many as its settings page lists (ADR 0220). */
     public const int OPEN_INVITES = Invitations::LIST_LIMIT;
@@ -71,9 +79,10 @@ final readonly class TenantSettings
         private ?ThrottleStore $throttles = null,
         private int $invitesPerHour = self::INVITES_PER_HOUR,
         private int $openInvites = self::OPEN_INVITES,
+        private int $actorInvitesPerHour = self::ACTOR_INVITES_PER_HOUR,
     ) {
-        if ($invitesPerHour < 1 || $openInvites < 1 || $openInvites > Invitations::LIST_LIMIT) {
-            throw new \InvalidArgumentException('An organization may send at least one invite an hour, and hold 1 to ' . Invitations::LIST_LIMIT . ' open.');
+        if ($invitesPerHour < 1 || $actorInvitesPerHour < 1 || $openInvites < 1 || $openInvites > Invitations::LIST_LIMIT) {
+            throw new \InvalidArgumentException('An organization and a person may each send at least one invite an hour, and an organization hold 1 to ' . Invitations::LIST_LIMIT . ' open.');
         }
     }
 
@@ -164,7 +173,7 @@ final readonly class TenantSettings
         if (!$this->invitePolicy->mayInvite($actor, $tenant, $panel, $role)) {
             throw new ValidationException(['role' => ['You may not invite anyone to that role: choose one that grants no more than yours.']]);
         }
-        $this->spendInvite($tenant, $panel);
+        $this->spendInvite($tenant, $panel, $actor);
 
         $this->invites->send($actor, $address, $tenant, $panel, $role);
         $this->activity->record(TenantChange::MemberInvited, $tenant, $actor, ['email' => $address, 'role' => $role]);
@@ -173,20 +182,30 @@ final readonly class TenantSettings
     /**
      * One of the organization's invites, or a refusal: past OPEN_INVITES
      * open in the panel -- counted from the invites made, so however slowly
-     * they were sent -- or past INVITES_PER_HOUR this hour, counted per
-     * organization in the ThrottleStore before the send, so concurrent
-     * invites cannot each pass a check none has counted. An invite that is
-     * not budgeted is not sent.
+     * they were sent -- or past ACTOR_INVITES_PER_HOUR sent by $actor this
+     * hour from any organization, or past INVITES_PER_HOUR this hour from
+     * this one, each counted in the ThrottleStore before the send, so
+     * concurrent invites cannot each pass a check none has counted. The
+     * person's first: one past their own budget spends none of the
+     * organization's, which their colleagues share. An invite that is not
+     * budgeted is not sent.
      *
      * @throws ValidationException under `email` past the open invites; HttpException 429 past the hour's
      */
-    private function spendInvite(string $tenant, string $panel): void
+    private function spendInvite(string $tenant, string $panel, Authenticatable $actor): void
     {
         if ($this->throttles === null) {
             throw new \LogicException('Invites are budgeted per organization in the store the throttles count in: give TenantSettings that ThrottleStore.');
         }
         if (\count($this->invitations->pending($tenant, $panel)) >= $this->openInvites) {
             throw new ValidationException(['email' => ["This organization has {$this->openInvites} invites open: revoke one, or wait for some to be accepted, before sending another."]]);
+        }
+
+        [$hits, $resetsAt] = $this->throttles->increment('tenant-invites-by:' . hash('sha256', $actor->authIdentifier()), 3600);
+        if ($hits > $this->actorInvitesPerHour) {
+            throw new HttpException(429, "You have sent {$this->actorInvitesPerHour} invites this hour: try again later.", 'too_many_requests', [
+                'retry-after' => (string) max(1, $resetsAt - time()),
+            ]);
         }
 
         [$hits, $resetsAt] = $this->throttles->increment('tenant-invites:' . hash('sha256', $tenant), 3600);

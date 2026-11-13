@@ -146,3 +146,13 @@ it('makes none of them in a process that says production', function (\Closure $m
     'switcher' => [fn () => TenantSwitcherFake::offering([])],
     'sessions' => [fn () => new TenantSessionsFake()],
 ]);
+
+it('makes none of them where nothing says this is a test\'s machine (ADR 0213)', function () {
+    $before = getenv('TINVAR_ENV');
+    putenv('TINVAR_ENV');
+    try {
+        expect(fn () => TenantSourceFake::always('acme'))->toThrow(\LogicException::class, 'refused: TINVAR_ENV is not local, development or testing');
+    } finally {
+        putenv($before === false ? 'TINVAR_ENV' : "TINVAR_ENV={$before}");
+    }
+});

@@ -102,9 +102,9 @@ final readonly class CustomDomainsConfig
         }
 
         if ($targets === [] && $addresses === []) {
-            $marker = DevMode::productionMarker(array_filter(getenv(), \is_string(...)));
+            $marker = DevMode::notDevelopment();
             if ($marker !== null) {
-                $problems[] = "Tenants add custom domains here, and {$marker}=production: set TINVAR_CUSTOM_DOMAIN_TARGETS to the host name "
+                $problems[] = "Tenants add custom domains here, where {$marker}: set TINVAR_CUSTOM_DOMAIN_TARGETS to the host name "
                     . 'their CNAME records point at, or TINVAR_CUSTOM_DOMAIN_ADDRESSES to the platform\'s addresses, or both.';
             }
             $targets = [self::DEVELOPMENT_TARGET];

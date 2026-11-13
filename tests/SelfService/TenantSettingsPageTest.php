@@ -13,7 +13,12 @@ declare(strict_types=1);
 
 namespace Tinvar\Tests\Tenancy\SelfService\Settings;
 
+use Tinvar\Http\ArrayThrottleStore;
+use Tinvar\Http\HttpException;
 use Tinvar\Http\Response;
+use Tinvar\Tenancy\SelfService\TenantSettings;
+use Tinvar\Tests\Tenancy\SelfService\Fixtures\Person;
+use Tinvar\Validation\ValidationException;
 use Tinvar\Mail\Address;
 use Tinvar\Mail\ArrayTransport;
 use Tinvar\Mail\LinkPolicy;
@@ -26,6 +31,33 @@ use Tinvar\Tests\Tenancy\SelfService\Fixtures\AdminWorld;
 use Tinvar\Tests\Tenancy\SelfService\Fixtures\InviteMails;
 
 require_once __DIR__ . '/Fixtures/self_service.php';
+
+/** The world's settings, with invite budgets of $perHour and $open. */
+function budgeted(AdminWorld $world, ArrayThrottleStore $throttles, int $perHour = 100, int $open = 100): TenantSettings
+{
+    return new TenantSettings(
+        $world->tenants,
+        $world->members,
+        $world->kit->invitations,
+        $world->kit->invitePolicy,
+        $world->invites,
+        throttles: $throttles,
+        invitesPerHour: $perHour,
+        openInvites: $open,
+    );
+}
+
+/** The HttpException $work throws, or null for none. */
+function refused(\Closure $work): ?HttpException
+{
+    try {
+        $work();
+    } catch (HttpException $e) {
+        return $e;
+    }
+
+    return null;
+}
 
 /** @return list<string> the errors under $field */
 function errors(Response $response, string $field): array
@@ -83,6 +115,16 @@ describe('the name and the slug', function () {
         expect(errors(new AdminWorld()->act('OrganizationSettings.rename', ['name' => $name]), 'name'))->not->toBe([]);
     })->with(['blank' => ['   '], 'long' => [str_repeat('a', 101)]]);
 
+    it('refuses a name that is not UTF-8, which the control-character check cannot read (ADR 0220)', function (string $name) {
+        $world = new AdminWorld();
+
+        expect(static fn () => $world->kit->settings->rename('acme', $name, new Person('m-1', '', '')))->toThrow(ValidationException::class)
+            ->and($world->tenants->profile('acme')?->name)->toBe('Acme');
+    })->with([
+        'a lone continuation byte, beside a bell' => ["Acme\x80\x07"],
+        'a truncated sequence, beside an escape' => ["Acme \xE2\x80\x1B[31m"],
+    ]);
+
     it('lets only a role carrying the settings permission change them', function () {
         $world = new AdminWorld();
 
@@ -137,6 +179,60 @@ describe('invites', function () {
             ->and($world->act('OrganizationSettings.invite', ['email' => 'x@example.net', 'role' => 'member'], 'm-3')->status)->toBe(403)
             ->and(errors($world->act('OrganizationSettings.invite', ['email' => 'x@example.net', 'role' => 'emperor']), 'role'))->not->toBe([])
             ->and($world->invites->sent)->toBe([]);
+    });
+
+    it('sends an organization no more invites an hour than its budget, counted per organization (ADR 0220)', function () {
+        $world = new AdminWorld();
+        $throttles = new ArrayThrottleStore();
+        $settings = budgeted($world, $throttles, perHour: 2);
+        $ann = new Person('m-1', '', '');
+
+        $world->orm->actAs('acme', static function () use ($settings, $ann): void {
+            $settings->invite('acme', 'customer', 'one@example.net', 'member', $ann);
+            $settings->invite('acme', 'customer', 'two@example.net', 'member', $ann);
+        });
+        $refused = $world->orm->actAs('acme', static fn (): ?HttpException => refused(static fn () => $settings->invite('acme', 'customer', 'three@example.net', 'member', $ann)));
+        // Globex's budget is its own.
+        $world->orm->actAs('globex', static fn () => $settings->invite('globex', 'customer', 'zed@example.net', 'member', new Person('m-9', '', '')));
+
+        expect($refused?->status)->toBe(429)
+            ->and($refused?->getMessage())->toContain('this hour')
+            ->and(array_column($world->invites->sent, 'email'))->toBe(['one@example.net', 'two@example.net', 'zed@example.net']);
+    });
+
+    it('keeps no more invites open in an organization than its budget, however slowly they are sent (ADR 0220)', function () {
+        $world = new AdminWorld();
+        $settings = budgeted($world, new ArrayThrottleStore(), open: 2);
+        $ann = new Person('m-1', '', '');
+
+        $world->orm->actAs('acme', static function () use ($settings, $ann): void {
+            $settings->invite('acme', 'customer', 'one@example.net', 'member', $ann);
+            $settings->invite('acme', 'customer', 'two@example.net', 'member', $ann);
+        });
+        $refused = $world->orm->actAs('acme', static function () use ($settings, $ann): ?string {
+            try {
+                $settings->invite('acme', 'customer', 'three@example.net', 'member', $ann);
+            } catch (ValidationException $e) {
+                return $e->errors['email'][0] ?? null;
+            }
+
+            return null;
+        });
+
+        expect($refused)->toContain('revoke one')
+            ->and($world->invites->sent)->toHaveCount(2);
+    });
+
+    it('refuses an impersonator, or an API token, accepting an invite by its emailed link (ADR 0220)', function () {
+        $world = new AdminWorld();
+        $world->act('OrganizationSettings.invite', ['email' => 'dee@example.net', 'role' => 'admin']);
+        $token = $world->invites->lastToken();
+
+        expect($world->act('OrganizationInvitation.accept', ['token' => $token], 'm-4', headers: ['x-impersonator' => 'm-1'])->status)->toBe(403)
+            ->and($world->act('OrganizationInvitation.accept', ['token' => $token], 'm-4', headers: ['x-api-token' => 'tok-1'])->status)->toBe(403)
+            ->and($world->members->roleOf('acme', 'customer', 'm-4'))->toBeNull()
+            // Still open for Dee, signed in as herself.
+            ->and($world->act('OrganizationInvitation.accept', ['token' => $token], 'm-4')->status)->toBe(303);
     });
 
     it('revokes an open invite, and not one of another tenant\'s', function () {

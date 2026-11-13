@@ -68,10 +68,13 @@ final readonly class SlugRules
      * Domains, under the authority's.
      *
      * @param list<string> $reserved more slugs no tenant may take
+     * @param list<string> $hosts more of the platform's own hosts: the targets tenants'
+     *        custom domains are CNAMEs of (CustomDomainsConfig), whose labels under its
+     *        domains are reserved as every other platform host's are (ADR 0220)
      */
-    public static function forPlatform(Realms $realms, ?Domains $routing = null, array $reserved = []): self
+    public static function forPlatform(Realms $realms, ?Domains $routing = null, array $reserved = [], array $hosts = []): self
     {
-        $hosts = $realms->platformHosts();
+        $hosts = [...$realms->platformHosts(), ...$hosts];
         $roots = [self::rootOf($realms->authority->host)];
         if ($routing !== null) {
             $hosts = [...$hosts, ...$routing->hosts(), ...array_values($routing->roots)];

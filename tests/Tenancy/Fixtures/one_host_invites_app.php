@@ -207,6 +207,7 @@ final class App
             addresses: new Addresses(),
             switcher: $switcher,
             invites: $this->invites,
+            throttles: new \Tinvar\Http\ArrayThrottleStore(),
             activity: $this->activity,
         );
         $this->invites->invitations = $this->kit->invitations;

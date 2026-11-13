@@ -238,6 +238,7 @@ it('builds and opens invites on a development host of plain http on localhost', 
         users: $app->accounts->kit->lookup,
         canonical: new CanonicalOrigins('http://dash.localhost:8080', localHttp: true),
         invites: $app->invites,
+        throttles: new \Tinvar\Http\ArrayThrottleStore(),
         localHttp: true,
     );
 

@@ -61,3 +61,20 @@ it('refuses api as a slug on the settings page', function () {
         ->and($world->kit->slugs->isReserved('admin'))->toBeTrue()
         ->and($world->tenants->slugOf('acme'))->toBe('acme');
 });
+
+it('reserves the labels of the hosts custom domains point at, so no tenant holds the CNAME target (ADR 0220)', function () {
+    $realms = new Realms(Realm::platform('https://app.example.com'));
+    $rules = SlugRules::forPlatform($realms, hosts: ['domains.example.com', 'edge.eu.example.com', 'elsewhere.example.net']);
+
+    expect($rules->refusal('domains'))->toBe("'domains' is one of the platform's own addresses. Choose another.")
+        ->and($rules->isReserved('edge'))->toBeTrue()
+        ->and($rules->isReserved('eu'))->toBeTrue()
+        // A target under another domain is no subdomain a tenant could take.
+        ->and($rules->isReserved('elsewhere'))->toBeFalse();
+
+    // The kit reserves its configured targets: the fixture's is domains.example.test.
+    $world = new AdminWorld();
+    expect($world->kit->slugs->isReserved('domains'))->toBeTrue()
+        ->and($world->act('OrganizationSettings.changeSlug', ['slug' => 'domains'])->status)->toBe(422)
+        ->and($world->tenants->slugOf('acme'))->toBe('acme');
+});

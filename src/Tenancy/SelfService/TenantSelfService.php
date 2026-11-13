@@ -103,8 +103,9 @@ final readonly class TenantSelfService
      * @param TenantInvites|null $invites how an invite is sent; QueuedTenantInvites on
      *        $dispatcher unless given
      * @param TenantDomains|null $domains the custom domains' table; none, and no tenant adds one
-     * @param ThrottleStore|null $throttles the store the application's throttles count in, which
-     *        the TLS ask claims a domain's one check at a time in: needed with $domains
+     * @param ThrottleStore|null $throttles the store the application's throttles count in: each
+     *        organization's invites an hour are counted there (ADR 0220), and the TLS ask claims
+     *        a domain's one check at a time in it. Needed; null is refused
      * @param Domains|null $routing the application's Domains, where it routes by host: every
      *        label of every host it routes is reserved as a slug, as the realms' hosts' are
      * @param list<string> $reservedSlugs slugs beside `admin`, `api`, `www` and the platform's hosts' that
@@ -163,6 +164,12 @@ final readonly class TenantSelfService
         $invites ??= $dispatcher === null
             ? throw new \InvalidArgumentException('Invites are sent off the request: give the self-service kit the Dispatcher, or TenantInvites of your own.')
             : new QueuedTenantInvites($dispatcher);
+        if ($throttles === null) {
+            throw new \InvalidArgumentException(
+                'Invites are budgeted per organization, and custom domains checked one at a time, across every worker, in the store the throttles count in: give the self-service kit that ThrottleStore.',
+            );
+        }
+        $config = $domains === null ? null : ($domainsConfig ?? CustomDomainsConfig::load());
         $platformHosts = [$realms->authority->host];
         $this->settings = new TenantSettings(
             $profiles,
@@ -170,9 +177,12 @@ final readonly class TenantSelfService
             $this->invitations,
             $this->invitePolicy,
             $invites,
-            $this->slugs = SlugRules::forPlatform($realms, $routing, $reservedSlugs),
+            // The hosts tenants' domains are CNAMEs of are the platform's
+            // too: a tenant holding `domains` would hold the target itself.
+            $this->slugs = SlugRules::forPlatform($realms, $routing, $reservedSlugs, $config === null ? [] : $config->targets),
             $this->roles,
             $this->activity,
+            $throttles,
         );
 
         if ($domains === null) {
@@ -183,13 +193,7 @@ final readonly class TenantSelfService
 
             return;
         }
-        if ($throttles === null) {
-            throw new \InvalidArgumentException(
-                'Custom domains are checked one at a time across every worker, in the store the throttles count in: give the self-service kit that ThrottleStore.',
-            );
-        }
 
-        $config = $domainsConfig ?? CustomDomainsConfig::load();
         $dns ??= new SystemDnsResolver();
         if (!$dns instanceof DnsTextResolver) {
             throw new \InvalidArgumentException('A tenant proves a custom domain with a TXT record: give a DnsResolver that is a DnsTextResolver too, as SystemDnsResolver is.');

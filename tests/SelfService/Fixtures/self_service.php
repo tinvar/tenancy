@@ -296,7 +296,7 @@ final readonly class SignInAs implements Middleware
     {
         $user = $request->header('x-user') ?? 'm-1';
         if ($user !== 'nobody') {
-            $this->auth->login(new Person($user, '', ''), '1');
+            $this->auth->login(new Person($user, '', ''), '1', $request->header('x-api-token'), $request->header('x-impersonator'));
         }
 
         return $next($request);
@@ -560,10 +560,11 @@ final class AdminWorld
 
     /**
      * @param array<string, mixed> $body
+     * @param array<string, string> $headers more headers: `x-impersonator`, `x-api-token`
      */
-    public function act(string $action, array $body, string $as = 'm-1', string $host = 'acme.example.test'): Response
+    public function act(string $action, array $body, string $as = 'm-1', string $host = 'acme.example.test', array $headers = []): Response
     {
-        return $this->app->post("/_action/{$action}", $host, $body, ['x-user' => $as]);
+        return $this->app->post("/_action/{$action}", $host, $body, ['x-user' => $as, ...$headers]);
     }
 
     /** @return array<string, mixed> */

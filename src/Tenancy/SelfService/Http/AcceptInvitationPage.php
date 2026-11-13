@@ -63,7 +63,8 @@ use Tinvar\Validation\ValidationException;
  * to everything else -- its tenant, its origin, a week, once, and an
  * inviter who may still send it. Accepting takes someone signed in as the
  * account of the invited address -- a link forwarded, or opened in a
- * browser signed in as someone else, joins nobody -- and joins that account
+ * browser signed in as someone else, joins nobody; nor does anyone
+ * impersonating that account, or an API token (a 403, ADR 0220) -- and joins that account
  * to the invite's tenant alone, in the role the invite's record names. An
  * address with no account yet is told to make one, and the invite is left
  * open for when it has.
@@ -126,6 +127,12 @@ abstract class AcceptInvitationPage extends SelfServicePage
     #[Action(transaction: true), Authorize(TenantAbility::AcceptInvite->value, TenantAdministration::class)]
     final public function accept(AcceptInvitationRequest $input, Request $request): ActionResult
     {
+        // The person's own to take, as PersonalInvitations holds it (ADR
+        // 0201): support signed in as them, or a token of one tenant's,
+        // joins nobody to anything (ADR 0220).
+        if ($this->auth->apiToken() !== null || $this->auth->impersonator() !== null) {
+            throw new HttpException(403, 'Only the person an invite was sent to may accept it, signed in as themselves.', 'forbidden');
+        }
         $tenant = $this->invitationTenant($request, $input->token) ?? throw self::closed();
         $invitation = $this->orm->actAs($tenant, fn (): Invitation => $this->join($input->token, $tenant));
 
